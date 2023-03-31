@@ -174,15 +174,7 @@ for (dataset in unique(combined_df$Dataset)){
 	###DONE###
 }
 
-###Between-dataset similarity: ICC/overlap/dice?
-
-#Linear model
-#Age and sex as covariates
-#Get effects of DX--p-values
-#For each dataset, get top X percentile of vertices based on p-value, ranging from 1-25%, with 1% increments.
-#Do this for rank vs. raw
-#At each threshold, ICC/dice overlap between datasets to look for spatial overlap/similarity of effects
-#Finally, t-test between overlap across thresholds between rank vs. raw
+###Between-dataset similarity
 
 df_TOPSY <- read_tsv("../TOPSY_rank/TOPSY_subset_20230327.tsv")
 
@@ -203,17 +195,102 @@ df_TOPSY %<>% filter(DX=="HC" | DX=="FEP" | DX=="Scz")
 df_TOPSY$DX <- relevel(factor(df_TOPSY$DX), ref="HC")
 df_TOPSY$DX %<>% droplevels()
 
+left_ct_compare_TOPSY <- compare_models(df_TOPSY, "left_ct", "DX")
+right_ct_compare_TOPSY <- compare_models(df_TOPSY, "right_ct", "DX")
+
 combined_df_TOPSY <- bind_rows(combined_df, df_TOPSY)
 
-vs <- vertexLm(left_ct ~ Age + Sex + DX, data=df_TOPSY)
+###Collecting p-values of logistic regression, DX ~ CT (raw or ranked)
+ct_compare_datasets_raw <- data.frame()
+ct_compare_datasets_ranked <- data.frame()
 
-for (dataset in unique(combined_df$Dataset)){
+for (dataset in unique(combined_df_TOPSY$Dataset)){
+
+	left_ct_compare <- get(paste0("left_ct_compare_",dataset))
+	right_ct_compare <- get(paste0("right_ct_compare_",dataset))
+
+	col_raw <- rbind(left_ct_compare, right_ct_compare)$p_raw %>% data.frame()
+	colnames(col_raw) <- paste0(dataset, "_p_raw")
+
+	col_ranked <- rbind(left_ct_compare, right_ct_compare)$p_ranked %>% data.frame()
+	colnames(col_ranked) <- paste0(dataset, "_p_ranked")
+
+	if (length(ct_compare_datasets_raw) == 0) {
+		ct_compare_datasets_raw <- data.frame(col_raw, check.names = FALSE)
+		ct_compare_datasets_ranked <- data.frame(col_ranked, check.names = FALSE)
+
+	} else {
+		ct_compare_datasets_raw %<>% cbind(., col_raw)
+		ct_compare_datasets_ranked %<>% cbind(., col_ranked)
+	}
+}
+
+for (dataset in unique(combined_df_TOPSY$Dataset)){
+
+	left_ct_compare <- get(paste0("left_ct_compare_",dataset))
+	right_ct_compare <- get(paste0("right_ct_compare_",dataset))
+
+	col_raw <- rbind(left_ct_compare, right_ct_compare)$z_raw %>% data.frame()
+	colnames(col_raw) <- paste0(dataset, "_z_raw")
+
+	col_ranked <- rbind(left_ct_compare, right_ct_compare)$z_ranked %>% data.frame()
+	colnames(col_ranked) <- paste0(dataset, "_z_ranked")
+
+	if (length(ct_compare_datasets_raw) == 0) {
+		ct_compare_datasets_raw <- data.frame(col_raw, check.names = FALSE)
+		ct_compare_datasets_ranked <- data.frame(col_ranked, check.names = FALSE)
+
+	} else {
+		ct_compare_datasets_raw %<>% cbind(., col_raw)
+		ct_compare_datasets_ranked %<>% cbind(., col_ranked)
+	}
+}
+
+
+threshold_column <- function(column, percentile) {
+  threshold_value <- quantile(column, probs = percentile)
+  return(ifelse(column <= threshold_value, 1, 0))
+}
+
+thresholds <- seq(0.01, 0.20, 0.01)
+
+for (i in thresholds){
+	apply(ct_compare_datasets_raw, 2, threshold_column, percentile=i)
+}
+
+pairwise_similarity <- function(df) {
 	
-	data <- subset(combined_df, Dataset==dataset)
-	data %<>% filter(DX=="HC" | DX=="FEP" | DX=="Scz")
-	data$DX %<>% droplevels()
+	result <- data.frame()
+
+	for (i in 1:(ncol(df)-1)) {
+		colA <- colnames(df)[i] #Main column to be comparing against
+		
+		for (j in (i+1):ncol(df)){
+			colB <- colnames(df)[j] #Second column being compared
+			
+			table <- table(df[,i], df[,j])
+			chitest <- chisq.test(table)
+
+			result <- rbind(result, cbind(colA, colB, table[4], chitest$statistic))
+		}
+	}
+	
+	colnames(result) <- c("ColA", "ColB", "Overlap", "Chisq")
+	result %<>% mutate_at(vars("Overlap", "Chisq"), as.numeric)
+	return(result)
+}
 
 
+test1 <- apply(ct_compare_datasets_raw, 2, threshold_column, percentile=i) %>% as.data.frame
+test2 <- apply(ct_compare_datasets_ranked, 2, threshold_column, percentile=i) %>% as.data.frame
+test1 %<>% pairwise_similarity()
+test2 %<>% pairwise_similarity()
+
+t.test(test1$Chisq, test2$Chisq)
+t.test(test1$Overlap, test2$Overlap)
+
+summary(test1)
+summary(test2)
 
 
 ###5. Imaging-transcriptomics & comparison to raw CT-based testing

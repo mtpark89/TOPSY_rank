@@ -211,9 +211,6 @@ plot_histo <- ggplot(ct_rank_diff, aes(x=diff, group=hemi, fill=hemi)) + geom_de
 
 ggsave("Plot_histo_mean_rankdiff.png", plot_histo, width=5, height=5, bg="white")
 
-
-
-
 ###5. Imaging-transcriptomics & comparison to raw CT-based testing
 
 ###Compare number of significant genes
