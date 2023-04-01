@@ -145,6 +145,35 @@ cor_columns <- function(df1, df2) {
   return(t(data.frame(cor_matrix)))
 }
 
+threshold_column <- function(column, percentile) {
+  threshold_value <- quantile(column, probs = percentile)
+  return(ifelse(column <= threshold_value, 1, 0))
+}
+
+
+pairwise_similarity <- function(df) {
+	
+	result <- data.frame()
+
+	for (i in 1:(ncol(df)-1)) {
+		colA <- colnames(df)[i] #Main column to be comparing against
+		
+		for (j in (i+1):ncol(df)){
+			colB <- colnames(df)[j] #Second column being compared
+			
+			table <- table(df[,i], df[,j])
+			chitest <- chisq.test(table)
+
+			result <- rbind(result, cbind(colA, colB, table[4], chitest$statistic))
+		}
+	}
+	
+	colnames(result) <- c("ColA", "ColB", "Overlap", "Chisq")
+	result %<>% mutate_at(vars("Overlap", "Chisq"), as.numeric)
+	return(result)
+}
+
+
 indiv_rankdiff <- function(reference, sample) {
 	#Individual rank differences based on a reference dataset
 	#indiv_rankdiff(gf_HC$left_CT, gf$left_CT) for example.
@@ -318,6 +347,38 @@ cayley_dist_ref <- function(reference, sample, map) {
 	}
 
 	colnames(rankdiff) <- paste("cayley_",sort(unique(map)), sep="")
+	return(data.frame(rankdiff))
+}
+
+hamming_vecmat <- function(y, x) { #y is vector, x is matrix
+  res <- matrix(nrow=nrow(x))
+
+  for (i in 1:nrow(x)) res[i] <- distHamming(y, x[i,])  
+  res
+}
+
+hamming_dist_ref <- function(reference, sample, map) {
+	#Individual rank differences based on a reference, PER DEFINED SUBREGION
+	#hamming_dist_ref(gf_HC$left_CT, gf$left_CT, stat_maps_left$yeo7) for example.
+	#The median ranks of the reference set is computed & ranked again to preserve rankings
+
+	refset<- vertexTableRank(reference) %>% colMedians() %>% rank(ties.method="first") %>% t()
+	testset<- vertexTableRank(sample)
+
+	rankdiff <- matrix(nrow=nrow(testset), ncol=length(unique(map)))
+
+	for (i in 1: length(unique(map))) {
+		
+		label <- sort(unique(map))[i]
+		
+		#Subset total vertices into label-specific vertices, then re-rank them.
+		refset_label <- refset[,map==label] %>% rank(ties.method="first")
+		testset_label <- testset[,map==label] %>% rowRanks()
+		
+		rankdiff[,i] <- hamming_vecmat(t(refset_label), testset_label)
+	}
+
+	colnames(rankdiff) <- paste("hamming_",sort(unique(map)), sep="")
 	return(data.frame(rankdiff))
 }
 

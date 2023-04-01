@@ -247,39 +247,12 @@ for (dataset in unique(combined_df_TOPSY$Dataset)){
 }
 
 
-threshold_column <- function(column, percentile) {
-  threshold_value <- quantile(column, probs = percentile)
-  return(ifelse(column <= threshold_value, 1, 0))
-}
-
+###Thresholding over range, then comparing overlapping vertices with chi-square test
 thresholds <- seq(0.01, 0.20, 0.01)
 
 for (i in thresholds){
 	apply(ct_compare_datasets_raw, 2, threshold_column, percentile=i)
 }
-
-pairwise_similarity <- function(df) {
-	
-	result <- data.frame()
-
-	for (i in 1:(ncol(df)-1)) {
-		colA <- colnames(df)[i] #Main column to be comparing against
-		
-		for (j in (i+1):ncol(df)){
-			colB <- colnames(df)[j] #Second column being compared
-			
-			table <- table(df[,i], df[,j])
-			chitest <- chisq.test(table)
-
-			result <- rbind(result, cbind(colA, colB, table[4], chitest$statistic))
-		}
-	}
-	
-	colnames(result) <- c("ColA", "ColB", "Overlap", "Chisq")
-	result %<>% mutate_at(vars("Overlap", "Chisq"), as.numeric)
-	return(result)
-}
-
 
 test1 <- apply(ct_compare_datasets_raw, 2, threshold_column, percentile=i) %>% as.data.frame
 test2 <- apply(ct_compare_datasets_ranked, 2, threshold_column, percentile=i) %>% as.data.frame
@@ -292,10 +265,120 @@ t.test(test1$Overlap, test2$Overlap)
 summary(test1)
 summary(test2)
 
-
 ###5. Imaging-transcriptomics & comparison to raw CT-based testing
 
-###BOOKMARK
+ct_compare_ahba <- data.frame()
+for (dataset in unique(combined_df$Dataset)){
+	
+	data <- subset(combined_df, Dataset==dataset)
+	data %<>% filter(DX=="HC" | DX=="FEP" | DX=="Scz")
+	data$DX %<>% droplevels()
+
+	data_split <- split(data, data$DX)
+
+	#Read in files, raw ct and ranked, and for groups.	
+	left_ct <- vertexTable(data$left_ct)
+	right_ct <- vertexTable(data$right_ct)
+
+	left_ct_rank <- t(vertexTableRank(data$left_ct))
+	right_ct_rank <- t(vertexTableRank(data$right_ct))
+
+	left_ct_rank_HC <- t(vertexTableRank(data_split[[1]]$left_ct))
+	right_ct_rank_HC <- t(vertexTableRank(data_split[[1]]$right_ct))
+
+	left_ct_rank_Scz <- t(vertexTableRank(data_split[[2]]$left_ct))
+	right_ct_rank_Scz <- t(vertexTableRank(data_split[[2]]$right_ct))
+	
+	#Group means: mean CT across dataset, and ranked mean CT
+	group_mean_left <- cbind(rowMeans(left_ct), rank(rowMeans(left_ct), ties.method="first"))
+	group_mean_right <- cbind(rowMeans(right_ct), rank(rowMeans(right_ct), ties.method="first"))
+
+	colnames(group_mean_left) <- c("left_ct", "left_ct_rank")
+	colnames(group_mean_right) <- c("right_ct", "right_ct_rank")
+	
+	#Get group-wise median rank of individual ranked CT (which is ranked again), and combine with cortical maps
+	group_left_ct_final <- cbind(group_mean_left, rank(rowMedians(left_ct_rank), ties.method="first"), stat_maps_left)
+	colnames(group_left_ct_final)[1:3] <- c("mean_ct", "mean_ct_rank", "median_ct_rank")
+	
+	#Print out plots for each dataset
+	plot1 <- ggplot(group_left_ct_final, aes(x=median_ct_rank, y=as.factor(yeo7))) +
+		geom_density_ridges(alpha=1, size=1) + stat_density_ridges(quantile_lines=TRUE, quantiles=0.5) + 
+		theme_ridges(grid=FALSE, center_axis_labels=TRUE) +
+		labs(x = "", y = "Yeo Networks", title = dataset) +
+		scale_y_discrete(labels=c("Unmatched", "Visual", "Somatomotor", "DorsalAtt", "VentralAtt", "Limbic", "Frontoparietal", "Default")) +
+		theme_minimal() + 
+		theme(text=element_text(size=22, family="Helvetica"),
+			axis.text.x=element_text(angle=45, hjust=0.35),
+			axis.title.x=element_blank(),
+			axis.text=element_text(size=16),
+			plot.title = element_text(size=20, face="bold"))
+
+	plot2 <- ggplot(group_left_ct_final, aes(x=median_ct_rank, y=as.factor(vonEconomo))) +
+		geom_density_ridges(alpha=1, size=1) + stat_density_ridges(quantile_lines=TRUE, quantiles=0.5) + 
+		theme_ridges(grid=FALSE, center_axis_labels=TRUE) +
+		labs(x = "", y = "von Economo class") +
+		scale_y_discrete(labels=c("Unmatched", "Visual", "Somatomotor", "DorsalAtt", "VentralAtt", "Limbic", "Frontoparietal", "Default")) +
+		theme_minimal() + 
+		theme(text=element_text(size=22, family="Helvetica"),
+			axis.text.x=element_text(angle=45, hjust=0.35),
+			axis.title.x=element_blank(),
+			axis.text=element_text(size=16),
+			plot.title = element_text(size=20, face="bold"))
+
+	ggsave(paste("results/Plot_networks_ranks_",dataset,".png",sep=""), ggarrange(plot1, plot2, ncol=2), width=10, height=5, bg="white")
+
+	#Model comparisons: raw vs. ranked
+	
+	left_ct_compare <- compare_models(data, "left_ct", "DX")
+	right_ct_compare <- compare_models(data, "right_ct", "DX")
+	combined_compare <- rbind(left_ct_compare, right_ct_compare)
+
+	assign(paste0("left_ct_compare_", dataset), left_ct_compare)
+	assign(paste0("right_ct_compare_", dataset), right_ct_compare)
+
+	#t.tests for combined, and left/right, and add results to df for all datasets
+	t_comb <- t.test(combined_compare$AIC_raw, combined_compare$AIC_ranked)
+	t_left <- t.test(left_ct_compare$AIC_raw, left_ct_compare$AIC_ranked)
+	t_right <- t.test(right_ct_compare$AIC_raw, right_ct_compare$AIC_ranked)
+
+	t_aic <- cbind(dataset, parse_ttest(t_comb), parse_ttest(t_left), parse_ttest(t_right))
+	colnames(t_aic) <- c("dataset", "t_combined", "p_combined", "t_left", "p_left", "t_right", "p_right")
+		
+	datasets_t_aic <- rbind(datasets_t_aic, t_aic)
+
+	#Group differences in average rank using permutation testing, and write out results
+	assign(paste0("left_ct_rank_diff_", dataset), average_rank_diff_permute(data_split[[1]]$left_ct, data_split[[2]]$left_ct, 10000))
+	assign(paste0("right_ct_rank_diff_", dataset), average_rank_diff_permute(data_split[[1]]$right_ct, data_split[[2]]$right_ct, 10000))
+
+	writeVertex(get(paste0("left_ct_rank_diff_", dataset)), paste0("results/left_ct_rank_diff_",dataset,".vertstats"))
+	writeVertex(get(paste0("right_ct_rank_diff_", dataset)), paste0("results/right_ct_rank_diff_",dataset,".vertstats"))
+
+	#Plotting mean rank differences
+	left_ct_rank_diff <- get(paste0("left_ct_rank_diff_", dataset))
+	right_ct_rank_diff <- get(paste0("right_ct_rank_diff_", dataset))
+	
+	left_ct_rank_diff$hemi <- "Left CT"
+	right_ct_rank_diff$hemi <- "Right CT"
+	ct_rank_diff <- rbind(left_ct_rank_diff, right_ct_rank_diff)
+
+	plot_histo <- 
+	ggplot(ct_rank_diff, aes(x=diff, group=hemi, fill=hemi)) + 
+		geom_density(alpha=0.5, size=1) + 
+		labs(x = "Mean rank difference", y = "Density", title = dataset) +
+		theme_minimal() + 
+		theme(text=element_text(size=22, family="Helvetica"), 
+			axis.text.x=element_text(angle=45), 
+			axis.text=element_text(size=16),
+			legend.position="none", 
+			plot.title=element_text(hjust=0.5)) +
+		geom_vline(xintercept=sd(ct_rank_diff$diff)*2, linetype="dashed", colour="darkgray", size=2) + 
+		geom_vline(xintercept=-sd(ct_rank_diff$diff)*2, linetype="dashed", colour="darkgray", size=2)
+
+	ggsave(paste0("results/Plot_histo_mean_rankdiff_",dataset,".png"), plot_histo, width=5, height=5, bg="white")
+	
+	###DONE###
+}
+
 
 ###AHBA: ranked CT
 left_ct_rank_diff_ahba <- ahba_CIVET(left_ct_rank_diff$diff)
@@ -373,58 +456,75 @@ write.table(toppgene_dec10, file="results/toppgene_dec10.csv", sep="\t", row.nam
 
 ggsave("Plot_toppgene_deciles_comparison.png", ggarrange(plot_dec1, plot_dec10, ncol=2, common.legend = TRUE, legend="bottom"), width=10, height=5, bg="white")
 
-###6. Median rank testing
 
-left_ct_rank <- t(vertexTableRank(hcp$left_ct))
-right_ct_rank <- t(vertexTableRank(hcp$right_ct))
+###Median rank correlation comparisons
+###Correct for agen + gender?
 
-left_ct_yeo <- getMedians(left_ct_rank, stat_maps_left$yeo7)
-right_ct_yeo <- getMedians(right_ct_rank, stat_maps_right$yeo7)
+ct_compare_correlations <- data.frame()
+for (dataset in unique(combined_df_TOPSY$Dataset)){
+	
+	df <- subset(combined_df_TOPSY, Dataset==dataset)
+	df %<>% filter(DX=="FEP" | DX=="Scz")
+	df$DX %<>% droplevels()
+	
+	df %<>% filter(Age < 41)
 
-#left_ct_yeo <- getMedians(left_ct_rank, stat_maps_left$yeo17)
-#right_ct_yeo <- getMedians(right_ct_rank, stat_maps_right$yeo17)
+	#data_split <- split(data, data$DX)
+	
+	left_ct_rank <- t(vertexTableRank(df$left_ct))
+	right_ct_rank <- t(vertexTableRank(df$right_ct))
 
-left_ct_vonEconomo <- getMedians(left_ct_rank, stat_maps_left$vonEconomo)
-right_ct_vonEconomo <- getMedians(right_ct_rank, stat_maps_right$vonEconomo)
+	left_ct_yeo <- getMedians(left_ct_rank, stat_maps_left$yeo7)
+	right_ct_yeo <- getMedians(right_ct_rank, stat_maps_right$yeo7)
 
-colnames(left_ct_yeo) <-  c("Unmatched_left", "Visual_left", "Somatomotor_left", "DorsalAtt_left", "VentralAtt_left", "Limbic_yeo_left", "Frontoparietal_left", "Default_left")
-colnames(right_ct_yeo) <-  c("Unmatched_right", "Visual_right", "Somatomotor_right", "DorsalAtt_right", "VentralAtt_right", "Limbic_yeo_right", "Frontoparietal_right", "Default_right")
+	left_ct_vonEconomo <- getMedians(left_ct_rank, stat_maps_left$vonEconomo)
+	right_ct_vonEconomo <- getMedians(right_ct_rank, stat_maps_right$vonEconomo)
 
-colnames(left_ct_vonEconomo) <-  c("Unmatched_left", "Motor_left", "Association-FP_left", "Association-FT_left", "Sensory-2_left", "Sensory-1_left", "Limbic_left", "Insular_left")
-colnames(right_ct_vonEconomo) <-  c("Unmatched_right", "Motor_right", "Association-FP_right", "Association-FT_right", "Sensory-2_right", "Sensory-1_right", "Limbic_right", "Insular_right")
+	colnames(left_ct_yeo) <-  c("Unmatched_left", "Visual_left", "Somatomotor_left", "DorsalAtt_left", "VentralAtt_left", "Limbic_yeo_left", "Frontoparietal_left", "Default_left")
+	colnames(right_ct_yeo) <-  c("Unmatched_right", "Visual_right", "Somatomotor_right", "DorsalAtt_right", "VentralAtt_right", "Limbic_yeo_right", "Frontoparietal_right", "Default_right")
 
-hcp_medians <- cbind(hcp, left_ct_yeo, right_ct_yeo)
-hcp_medians_FEP <- subset(hcp_medians, DX=="FEP")
+	colnames(left_ct_vonEconomo) <-  c("Unmatched_left", "Motor_left", "Association-FP_left", "Association-FT_left", "Sensory-2_left", "Sensory-1_left", "Limbic_left", "Insular_left")
+	colnames(right_ct_vonEconomo) <-  c("Unmatched_right", "Motor_right", "Association-FP_right", "Association-FT_right", "Sensory-2_right", "Sensory-1_right", "Limbic_right", "Insular_right")
 
-##################################################
+	if (dataset %in% c("BrainGluSchi", "COBRE", "HCPEP", "TOPSY")) {
+		scores <- df %>% select(starts_with(c("PANSS_")))
+	} else {
+		scores <- df %>% select(ends_with(c("_global")))
+	}
+	
+	
+	for(i in 1:ncol(scores)){
+		left_yeo <- cbind(Score=names(scores)[i], dataset, Label="Left Yeo", getCors(scores[[i]], left_ct_yeo))
+		right_yeo <- cbind(Score=names(scores)[i], dataset, Label="Right Yeo", getCors(scores[[i]], right_ct_yeo))
+		left_von <- cbind(Score=names(scores)[i], dataset, Label="Left von Economo", getCors(scores[[i]], left_ct_vonEconomo))
+		right_von <- cbind(Score=names(scores)[i], dataset, Label="Right von Economo", getCors(scores[[i]], right_ct_vonEconomo))
 
-getCors(hcp_medians_FEP$totalP, hcp_medians_FEP[(ncol(hcp_medians_FEP)-15):ncol(hcp_medians_FEP)])
-getCors(hcp_medians_FEP$totalN, hcp_medians_FEP[(ncol(hcp_medians_FEP)-15):ncol(hcp_medians_FEP)])
-getCors(hcp_medians_FEP$WksTo50P, hcp_medians_FEP[(ncol(hcp_medians_FEP)-15):ncol(hcp_medians_FEP)])
-getCors(hcp_medians_FEP$WksToCGI2, hcp_medians_FEP[(ncol(hcp_medians_FEP)-15):ncol(hcp_medians_FEP)])
+		ct_compare_correlations <- rbind(ct_compare_correlations, rbind(left_yeo, right_yeo, left_von, right_von))
+	}
+}
 
-summary(lm(hcp_medians_FEP$DorsalAtt_left ~ Age + Sex + euler_total + WksToCGI2, data=hcp_medians_FEP))
-summary(lm(hcp_medians_FEP$DorsalAtt_right ~ Age + Sex + euler_total + WksToCGI2, data=hcp_medians_FEP))
 
-melted <- melt(hcp_medians_FEP %>% select(DorsalAtt_left, DorsalAtt_right, WksToCGI2), id="WksToCGI2", variable.name="hemisphere")
-melted$hemisphere <-gsub('DorsalAtt_left', 'Left',
-		gsub('DorsalAtt_right', 'Right', melted$hemisphere))
+test <-ct_compare_correlations %>% filter(Score %in% c("SAPS_global", "SANS_global", "PANSS_pos", "PANSS_neg")) %>% filter(., grepl("Yeo", Label))
+test <-ct_compare_correlations %>% filter(Score %in% c("SAPS_global", "PANSS_pos")) %>% filter(., grepl("Yeo", Label))
 
-plot_cgi <-ggplot(melted, aes(x=value, y=WksToCGI2, group=hemisphere, colour=hemisphere)) + 
-    geom_point(size=2) + theme_minimal() + geom_smooth(method=lm, size=2) +
-    xlab("Median rank: Dorsal Attention network") + ylab("Weeks to reach CGI-S score 2") +
-    theme(text=element_text(size=18, family="Helvetica"), axis.text.x=element_text(hjust=0.35), axis.text=element_text(size=14), legend.title=element_blank(), legend.position = "bottom")
+test %<>% mutate_at(vars("Correlation", "pvalue"), as.numeric)
 
-ggsave("Plot_cgi_dorsal.png", plot_cgi, width=6, height=5, bg="white")
+###Plotting: dataset (organized by median age), network-symptom correlations
+test <-ct_compare_correlations %>% filter(Score %in% c("SAPS_global", "PANSS_pos")) %>% filter(., grepl("Yeo", Label))
 
-summary(lm(hcp_medians_FEP$Default_left ~ Age + Sex + euler_total + totalP, data=hcp_medians_FEP))
+test %<>% select(dataset, Correlation, Variable) %>% pivot_wider(names_from = Variable, values_from=Correlation)
 
-plot_totalP <- ggplot(hcp_medians_FEP, aes(x=Default_left, y=totalP)) + 
-	geom_point(size=2) + theme_minimal() + geom_smooth(method=lm, size=2) +
-	xlab("Median rank: Default network") + ylab("Total positive symptoms") +
-	theme(text=element_text(size=18, family="Helvetica"), axis.text.x=element_text(hjust=0.35), axis.text=element_text(size=14), legend.title=element_blank())
+test2 <- test %>% select(-dataset) %>% mutate_all(as.numeric) %>% as.matrix()
+rownames(test2) <- test$dataset
 
-ggsave("Plot_totalP.png", plot_totalP, width=6, height=5, bg="white")
+
+test <-ct_compare_correlations %>% filter(Score %in% c("SANS_global", "PANSS_neg")) %>% filter(., grepl("Yeo", Label))
+
+test %<>% select(dataset, Correlation, Variable) %>% pivot_wider(names_from = Variable, values_from=Correlation)
+
+test2 <- test %>% select(-dataset) %>% mutate_all(as.numeric) %>% as.matrix()
+rownames(test2) <- test$dataset
+
 
 ####################################
 ###Comparison: raw cortical thickness & network medians
@@ -452,8 +552,14 @@ hcp_medians_combined <- rbind(hcp_medians_FEP, hcp_medians_raw_FEP)
 #####################################################
 ###7. Rank-based normative modelling: using median rank of HCs to get cayley distances between individual & median network ranks
 
-cayley_ct_left_hcmed_yeo7 <- cayley_dist_ref(hcp_HC$left_ct, hcp$left_ct, stat_maps_left$yeo7)
-cayley_ct_right_hcmed_yeo7 <- cayley_dist_ref(hcp_HC$right_ct, hcp$right_ct, stat_maps_right$yeo7)
+combined_df_TOPSY_HC <- combined_df_TOPSY %>% filter(DX=="HC")
+
+cayley_ct_left_hcmed_yeo7 <- cayley_dist_ref(combined_df_TOPSY_HC$left_ct, combined_df_TOPSY$left_ct, stat_maps_left$yeo7)
+cayley_ct_right_hcmed_yeo7 <- cayley_dist_ref(combined_df_TOPSY_HC$right_ct, combined_df_TOPSY$right_ct, stat_maps_right$yeo7)
+
+hamming_ct_left_hcmed_yeo7 <- hamming_dist_ref(combined_df_TOPSY_HC$left_ct, combined_df_TOPSY$left_ct, stat_maps_left$yeo7)
+hamming_ct_right_hcmed_yeo7 <- hamming_dist_ref(combined_df_TOPSY_HC$right_ct, combined_df_TOPSY$right_ct, stat_maps_right$yeo7)
+
 
 ###Rank-based normative modelling: using all reference subjects, time consuming, but better results.
 
@@ -472,64 +578,6 @@ write.table(cayley_ct_right_yeo7, "results/cayley_ct_right_yeo7.csv", sep="\t", 
 write.table(cayley_ct_right_yeo17, "results/cayley_ct_right_yeo17.csv", sep="\t", row.names=F)
 write.table(cayley_ct_right_vonEconomo, "results/cayley_ct_right_vonEconomo.csv", sep="\t", row.names=F)
 
-#######################################
-
-cayley_ct_left_yeo7 %<>% append_colnames(., "_left")
-cayley_ct_right_yeo7 %<>% append_colnames(., "_right")
-
-hcp_cayley <- cbind(hcp, cayley_ct_left_yeo7, cayley_ct_right_yeo7)
-hcp_cayley_FEP <- subset(hcp_cayley, DX=="FEP")
-
-summary(lm(cayley_1_left ~ Age + Sex + DX, data=hcp_cayley))
-summary(lm(cayley_2_left ~ Age + Sex + DX, data=hcp_cayley))
-summary(lm(cayley_3_left ~ Age + Sex + DX, data=hcp_cayley))
-summary(lm(cayley_4_left ~ Age + Sex + DX, data=hcp_cayley))
-summary(lm(cayley_5_left ~ Age + Sex + DX, data=hcp_cayley))
-summary(lm(cayley_6_left ~ Age + Sex + DX, data=hcp_cayley))
-summary(lm(cayley_7_left ~ Age + Sex + DX, data=hcp_cayley))
-
-summary(lm(cayley_1_left ~ Age + Sex + euler_total + DX, data=hcp_cayley))
-summary(lm(cayley_2_left ~ Age + Sex + euler_total + DX, data=hcp_cayley))
-summary(lm(cayley_3_left ~ Age + Sex + euler_total + DX, data=hcp_cayley))
-summary(lm(cayley_4_left ~ Age + Sex + euler_total + DX, data=hcp_cayley))
-summary(lm(cayley_5_left ~ Age + Sex + euler_total + DX, data=hcp_cayley))
-summary(lm(cayley_6_left ~ Age + Sex + euler_total + DX, data=hcp_cayley))
-summary(lm(cayley_7_left ~ Age + Sex + euler_total + DX, data=hcp_cayley))
-
-summary(lm(cayley_1_left ~ Age + Sex + euler_total + DX, data=subset(hcp_cayley, DX=="FEP" | DX=="HC")))
-summary(lm(cayley_2_left ~ Age + Sex + euler_total + DX, data=subset(hcp_cayley, DX=="FEP" | DX=="HC")))
-summary(lm(cayley_3_left ~ Age + Sex + euler_total + DX, data=subset(hcp_cayley, DX=="FEP" | DX=="HC")))
-summary(lm(cayley_4_left ~ Age + Sex + euler_total + DX, data=subset(hcp_cayley, DX=="FEP" | DX=="HC")))
-summary(lm(cayley_5_left ~ Age + Sex + euler_total + DX, data=subset(hcp_cayley, DX=="FEP" | DX=="HC")))
-summary(lm(cayley_6_left ~ Age + Sex + euler_total + DX, data=subset(hcp_cayley, DX=="FEP" | DX=="HC")))
-summary(lm(cayley_7_left ~ Age + Sex + euler_total + DX, data=subset(hcp_cayley, DX=="FEP" | DX=="HC")))
-
-summary(lm(cayley_1_right ~ Age + Sex + DX, data=hcp_cayley))
-summary(lm(cayley_2_right ~ Age + Sex + DX, data=hcp_cayley))
-summary(lm(cayley_3_right ~ Age + Sex + DX, data=hcp_cayley))
-summary(lm(cayley_4_right ~ Age + Sex + DX, data=hcp_cayley))
-summary(lm(cayley_5_right ~ Age + Sex + DX, data=hcp_cayley))
-summary(lm(cayley_6_right ~ Age + Sex + DX, data=hcp_cayley))
-summary(lm(cayley_7_right ~ Age + Sex + DX, data=hcp_cayley))
-
-summary(lm(cayley_1_right ~ Age + Sex + euler_total + DX, data=hcp_cayley))
-summary(lm(cayley_2_right ~ Age + Sex + euler_total + DX, data=hcp_cayley))
-summary(lm(cayley_3_right ~ Age + Sex + euler_total + DX, data=hcp_cayley))
-summary(lm(cayley_4_right ~ Age + Sex + euler_total + DX, data=hcp_cayley))
-summary(lm(cayley_5_right ~ Age + Sex + euler_total + DX, data=hcp_cayley))
-summary(lm(cayley_6_right ~ Age + Sex + euler_total + DX, data=hcp_cayley))
-summary(lm(cayley_7_right ~ Age + Sex + euler_total + DX, data=hcp_cayley))
-
-getCors(hcp_cayley_FEP$totalP, hcp_cayley_FEP[(ncol(hcp_cayley_FEP)-15):ncol(hcp_cayley_FEP)])
-getCors(hcp_cayley_FEP$totalN, hcp_cayley_FEP[(ncol(hcp_cayley_FEP)-15):ncol(hcp_cayley_FEP)])
-getCors(hcp_cayley_FEP$WksTo50P, hcp_cayley_FEP[(ncol(hcp_cayley_FEP)-15):ncol(hcp_cayley_FEP)])
-getCors(hcp_cayley_FEP$WksToCGI2, hcp_cayley_FEP[(ncol(hcp_cayley_FEP)-15):ncol(hcp_cayley_FEP)])
-
-summary(lm(test$`cayley_3` ~ Age + Sex + euler_total + DX, data=test))
-
-colnames(left_ct_yeo) <-  c("Unmatched_left", "Visual_left", "Somatomotor_left", "DorsalAtt_left", "VentralAtt_left", "Limbic_yeo_left", "Frontoparietal_left", "Default_left")
-colnames(right_ct_yeo) <-  c("Unmatched_right", "Visual_right", "Somatomotor_right", "DorsalAtt_right", "VentralAtt_right", "Limbic_yeo_right", "Frontoparietal_right", "Default_right")
-
 ###Plotting
 
 melted <- melt(hcp_cayley %>% select(DX, contains(c("cayley", "left"))), id="DX", variable.name="network")
@@ -544,74 +592,10 @@ plot_cayley <- ggplot(melted, aes(x=network, y=value)) + geom_boxplot(aes(colour
 
 ggsave("Plot_cayley.png", plot_cayley, width=8, height=5, bg="white")
 
-####################Median rank testing
-
-left_ct_rank <- t(vertexTableRank(hcp$left_ct))
-right_ct_rank <- t(vertexTableRank(hcp$right_ct))
-
-left_ct <- vertexTable(hcp$left_ct)
-right_ct <- vertexTable(hcp$right_ct)
-
-#left_ct_yeo <- getSums(left_ct, stat_maps_left$yeo7)
-left_ct_yeo <- getMedians(left_ct, stat_maps_left$yeo7)
-right_ct_yeo <- getMedians(right_ct, stat_maps_right$yeo7)
-
-left_ct_yeo <- getMedians(left_ct, stat_maps_left$yeo7)
-
-left_ct_yeo <- getMedians(left_ct_rank, stat_maps_left$yeo7)
-right_ct_yeo <- getMedians(right_ct_rank, stat_maps_right$yeo7)
-
-left_ct_yeo <- getMedians(left_ct_rank, stat_maps_left$yeo17)
-right_ct_yeo <- getMedians(right_ct_rank, stat_maps_right$yeo17)
-
-colnames(left_ct_yeo) <-  c("Unmatched", "Visual", "Somatomotor", "DorsalAtt", "VentralAtt", "Limbic", "Frontoparietal", "Default")
-colnames(right_ct_yeo) <-  c("Unmatched", "Visual", "Somatomotor", "DorsalAtt", "VentralAtt", "Limbic", "Frontoparietal", "Default")
-
-test <- cbind(hcp, left_ct_yeo)
-test <- cbind(hcp, right_ct_yeo)
-test_FEP <- test %>% subset(DX=="FEP")
-
-##################################################
-
-left_sa_rank <- t(vertexTableRank(gf$left_sa))
-right_sa_rank <- t(vertexTableRank(gf$right_sa))
-
-left_sa <- vertexTable(gf$left_sa)
-right_sa <- vertexTable(gf$right_sa)
-
-#left_sa_yeo <- getSums(left_sa, stat_maps_left$yeo7)
-left_sa_yeo <- getMedians(left_sa, stat_maps_left$yeo7)
-right_sa_yeo <- getMedians(right_sa, stat_maps_right$yeo7)
-
-left_sa_yeo <- getMedians(left_sa_rank, stat_maps_left$yeo7)
-right_sa_yeo <- getMedians(right_sa_rank, stat_maps_right$yeo7)
-
-left_sa_yeo <- getMedians(left_sa_rank, stat_maps_left$yeo17)
-right_sa_yeo <- getMedians(right_sa_rank, stat_maps_right$yeo17)
-
-colnames(left_sa_yeo) <-  c("Unmatched", "Visual", "Somatomotor", "DorsalAtt", "VentralAtt", "Limbic", "Frontoparietal", "Default")
-colnames(right_sa_yeo) <-  c("Unmatched", "Visual", "Somatomotor", "DorsalAtt", "VentralAtt", "Limbic", "Frontoparietal", "Default")
-
-test <- cbind(gf, left_sa_yeo)
-test <- cbind(gf, right_sa_yeo)
-test_FEP <- test %>% subset(DX=="FEP")
-
-###########################
-
-summary(lm(test$`1` ~ Age + Sex + DX, data=test))
-summary(lm(test$`2` ~ Age + Sex + DX, data=test))
-summary(lm(test$`3` ~ Age + Sex + DX, data=test))
-summary(lm(test$`4` ~ Age + Sex + DX, data=test))
-summary(lm(test$`5` ~ Age + Sex + DX, data=test))
-summary(lm(test$`6` ~ Age + Sex + DX, data=test))
-summary(lm(test$`7` ~ Age + Sex + DX, data=test))
-
-getCors(test_FEP$totalP, test_FEP[(ncol(test_FEP)-7):ncol(test_FEP)])
-getCors(test_FEP$totalN, test_FEP[(ncol(test_FEP)-7):ncol(test_FEP)])
-getCors(test_FEP$panss_total, test_FEP[(ncol(test_FEP)-7):ncol(test_FEP)])
-getCors(test_FEP$ymrstot, test_FEP[(ncol(test_FEP)-7):ncol(test_FEP)])
 
 ########################################################3
+
+###TRY HAMMING DISTANCE as well.
 
 cayley_ct_left_yeo7 <- indiv_distance_cayley_sub(hcp_HC$left_ct, hcp$left_ct, stat_maps_left$yeo7)
 cayley_ct_left_yeo17 <- indiv_distance_cayley_sub(hcp_HC$left_ct, hcp$left_ct, stat_maps_left$yeo17)
@@ -663,200 +647,6 @@ test %<>% filter(DX_2!="Other")
 
 test_FEP <- subset(test, DX=="FEP")
 
-summary(lm(test$`kendall_1` ~ Age + Sex + DX, data=test))
-summary(lm(test$`kendall_2` ~ Age + Sex + DX, data=test))
-summary(lm(test$`kendall_3` ~ Age + Sex + DX, data=test))
-summary(lm(test$`kendall_4` ~ Age + Sex + DX, data=test))
-summary(lm(test$`kendall_5` ~ Age + Sex + DX, data=test))
-summary(lm(test$`kendall_6` ~ Age + Sex + DX, data=test))
-summary(lm(test$`kendall_7` ~ Age + Sex + DX, data=test))
-summary(lm(test$`kendall_8` ~ Age + Sex + DX, data=test))
-summary(lm(test$`kendall_9` ~ Age + Sex + DX, data=test))
-summary(lm(test$`kendall_10` ~ Age + Sex + DX, data=test))
-summary(lm(test$`kendall_11` ~ Age + Sex + DX, data=test))
-summary(lm(test$`kendall_12` ~ Age + Sex + DX, data=test))
-summary(lm(test$`kendall_13` ~ Age + Sex + DX, data=test))
-summary(lm(test$`kendall_14` ~ Age + Sex + DX, data=test))
-summary(lm(test$`kendall_15` ~ Age + Sex + DX, data=test))
-summary(lm(test$`kendall_16` ~ Age + Sex + DX, data=test))
-summary(lm(test$`kendall_17` ~ Age + Sex + DX, data=test))
-
-summary(lm(test$`cayley_1` ~ Age + Sex + DX, data=test))
-summary(lm(test$`cayley_2` ~ Age + Sex + DX, data=test))
-summary(lm(test$`cayley_3` ~ Age + Sex + DX, data=test))
-summary(lm(test$`cayley_4` ~ Age + Sex + DX, data=test))
-summary(lm(test$`cayley_5` ~ Age + Sex + DX, data=test))
-summary(lm(test$`cayley_6` ~ Age + Sex + DX, data=test))
-summary(lm(test$`cayley_7` ~ Age + Sex + DX, data=test))
-summary(lm(test$`cayley_8` ~ Age + Sex + DX, data=test))
-summary(lm(test$`cayley_9` ~ Age + Sex + DX, data=test))
-summary(lm(test$`cayley_10` ~ Age + Sex + DX, data=test))
-summary(lm(test$`cayley_11` ~ Age + Sex + DX, data=test))
-summary(lm(test$`cayley_12` ~ Age + Sex + DX, data=test))
-summary(lm(test$`cayley_13` ~ Age + Sex + DX, data=test))
-summary(lm(test$`cayley_14` ~ Age + Sex + DX, data=test))
-summary(lm(test$`cayley_15` ~ Age + Sex + DX, data=test))
-summary(lm(test$`cayley_16` ~ Age + Sex + DX, data=test))
-summary(lm(test$`cayley_17` ~ Age + Sex + DX, data=test))
-
-summary(lm(test$`cayley_1` ~ Age + Sex + DX_2, data=test))
-summary(lm(test$`cayley_2` ~ Age + Sex + DX_2, data=test))
-summary(lm(test$`cayley_3` ~ Age + Sex + DX_2, data=test))
-summary(lm(test$`cayley_4` ~ Age + Sex + DX_2, data=test))
-summary(lm(test$`cayley_5` ~ Age + Sex + DX_2, data=test))
-summary(lm(test$`cayley_6` ~ Age + Sex + DX_2, data=test))
-summary(lm(test$`cayley_7` ~ Age + Sex + DX_2, data=test))
-summary(lm(test$`cayley_8` ~ Age + Sex + DX_2, data=test))
-summary(lm(test$`cayley_9` ~ Age + Sex + DX_2, data=test))
-summary(lm(test$`cayley_10` ~ Age + Sex + DX_2, data=test))
-summary(lm(test$`cayley_11` ~ Age + Sex + DX_2, data=test))
-summary(lm(test$`cayley_12` ~ Age + Sex + DX_2, data=test))
-summary(lm(test$`cayley_13` ~ Age + Sex + DX_2, data=test))
-summary(lm(test$`cayley_14` ~ Age + Sex + DX_2, data=test))
-summary(lm(test$`cayley_15` ~ Age + Sex + DX_2, data=test))
-summary(lm(test$`cayley_16` ~ Age + Sex + DX_2, data=test))
-summary(lm(test$`cayley_17` ~ Age + Sex + DX_2, data=test))
-
-getCors(test_FEP$totalP, test_FEP[(ncol(test_FEP)-7):ncol(test_FEP)])
-getCors(test_FEP$totalN, test_FEP[(ncol(test_FEP)-7):ncol(test_FEP)])
-getCors(test_FEP$panss_total, test_FEP[(ncol(test_FEP)-7):ncol(test_FEP)])
-getCors(test_FEP$ymrstot, test_FEP[(ncol(test_FEP)-7):ncol(test_FEP)])
-
-###HCP
-
-vonEconomo
-totalP ~ cayley_6
-pansstotal ~4
-
-Yeo
-
-
-DX 5
-DX_2~ 5, 6
-
-
-getCors(test_FEP$YMRS_total, test_FEP[(ncol(test_FEP)-7):ncol(test_FEP)])
-getCors(test_FEP$CDS_total, test_FEP[(ncol(test_FEP)-7):ncol(test_FEP)])
-getCors(test_FEP$WksTo50P, test_FEP[(ncol(test_FEP)-7):ncol(test_FEP)])
-getCors(test_FEP$WksToCGI2, test_FEP[(ncol(test_FEP)-7):ncol(test_FEP)])
-getCors(test_FEP$DUP_Weeks, test_FEP[(ncol(test_FEP)-7):ncol(test_FEP)])
-getCors(test_FEP$Glutamate, test_FEP[(ncol(test_FEP)-7):ncol(test_FEP)])
-
-getCors(test_FEP$totalP, test_FEP[(ncol(test_FEP)-17):ncol(test_FEP)])
-getCors(test_FEP$totalN, test_FEP[(ncol(test_FEP)-17):ncol(test_FEP)])
-getCors(test_FEP$PANSSTOTAL, test_FEP[(ncol(test_FEP)-17):ncol(test_FEP)])
-getCors(test_FEP$YMRS_total, test_FEP[(ncol(test_FEP)-17):ncol(test_FEP)])
-getCors(test_FEP$CDS_total, test_FEP[(ncol(test_FEP)-17):ncol(test_FEP)])
-getCors(test_FEP$WksTo50P, test_FEP[(ncol(test_FEP)-17):ncol(test_FEP)])
-getCors(test_FEP$WksToCGI2, test_FEP[(ncol(test_FEP)-17):ncol(test_FEP)])
-getCors(test_FEP$DUP_Weeks, test_FEP[(ncol(test_FEP)-17):ncol(test_FEP)])
-getCors(test_FEP$Glutamate, test_FEP[(ncol(test_FEP)-17):ncol(test_FEP)])
-
-
-####Cross-sample analysis
-
-
-###TOPSY HC vs. HCP FEP
-
-
-###HCP HC vs. TOPSY FEP
-
-
-getCors(test$panss_total, test[49:56])
-
-####################################3
-
-#Make new function for this...
-
-getCors <- function(var, columns) {
-	datalist = data.frame()
-
-	for (i in 1:ncol(columns)) {
-		test <- cor.test(var, columns[,i])
-
-		datalist <- rbind(datalist, cbind(colnames(columns)[i], test$estimate, test$p.value))
-	}
-	colnames(datalist) <- c("Variable", "Correlation", "pvalue")
-	return(datalist)
-}
-
-summary(lm(test$`1` ~ Age + Sex + DX, data=test))
-summary(lm(test$`2` ~ Age + Sex + DX, data=test))
-summary(lm(test$`3` ~ Age + Sex + DX, data=test))
-summary(lm(test$`4` ~ Age + Sex + DX, data=test))
-summary(lm(test$`5` ~ Age + Sex + DX, data=test))
-summary(lm(test$`6` ~ Age + Sex + DX, data=test))
-summary(lm(test$`7` ~ Age + Sex + DX, data=test))
-summary(lm(test$`8` ~ Age + Sex + DX, data=test))
-summary(lm(test$`9` ~ Age + Sex + DX, data=test))
-summary(lm(test$`10` ~ Age + Sex + DX, data=test))
-summary(lm(test$`11` ~ Age + Sex + DX, data=test))
-summary(lm(test$`12` ~ Age + Sex + DX, data=test))
-summary(lm(test$`13` ~ Age + Sex + DX, data=test))
-summary(lm(test$`14` ~ Age + Sex + DX, data=test))
-summary(lm(test$`15` ~ Age + Sex + DX, data=test))
-summary(lm(test$`16` ~ Age + Sex + DX, data=test))
-summary(lm(test$`17` ~ Age + Sex + DX, data=test))
-
-getCors(test_FEP$totalP, test_FEP[506:513])
-getCors(test_FEP$totalN, test_FEP[506:513])
-getCors(test_FEP$PANSSTOTAL, test_FEP[506:513])
-getCors(test_FEP$YMRS_total, test_FEP[506:513])
-getCors(test_FEP$CDS_total, test_FEP[506:513])
-getCors(test_FEP$WksTo50P, test_FEP[506:513])
-getCors(test_FEP$WksToCGI2, test_FEP[506:513])
-getCors(test_FEP$DUP_Weeks, test_FEP[506:513])
-
-getCors(test_FEP$totalP, test_FEP[(ncol(test_FEP)-17):ncol(test_FEP)])
-getCors(test_FEP$totalN, test_FEP[(ncol(test_FEP)-17):ncol(test_FEP)])
-getCors(test_FEP$PANSSTOTAL, test_FEP[(ncol(test_FEP)-17):ncol(test_FEP)])
-getCors(test_FEP$YMRS_total, test_FEP[(ncol(test_FEP)-17):ncol(test_FEP)])
-getCors(test_FEP$CDS_total, test_FEP[(ncol(test_FEP)-17):ncol(test_FEP)])
-getCors(test_FEP$WksTo50P, test_FEP[(ncol(test_FEP)-17):ncol(test_FEP)])
-getCors(test_FEP$WksToCGI2, test_FEP[(ncol(test_FEP)-17):ncol(test_FEP)])
-getCors(test_FEP$DUP_Weeks, test_FEP[(ncol(test_FEP)-17):ncol(test_FEP)])
-getCors(test_FEP$Glutamate, test_FEP[(ncol(test_FEP)-17):ncol(test_FEP)])
-
-
-
-
-
-
-###Dorsal attention network is associated with treatment response--have literature to back up
-###AHBA analysis: region-specific expression, using limma. Vertices within dorsal attention network vs. others
-###Genes, correlate with risperidone, or antipsychotic median expression profiles?
-###
-
-
-left_ct_yeo <- getSums(left_ct_rank, stat_maps_left$yeo7)
-left_ct_von <- getSums(left_ct_rank, stat_maps_left$vonEconomo)
-
-left_ct_yeo <- getMedians(left_ct_rank, stat_maps_left$yeo7)
-left_ct_von <- getMedians(left_ct_rank, stat_maps_left$vonEconomo)
-
-test <- cbind(gf, left_ct_yeo)
-
-
-test_von <- cbind(gf, left_ct_von)
-test_von_2 <- test_von %<>% subset(DX=="FEP" | DX=="HC")
-
-#1. Group rank testing, imaging-transcriptomics
-
-gf_FEP <- subset(gf, DX=="FEP")
-gf_HC <- subset(gf, DX=="HC")
-
-avg_diff_left_ct<- average_rank_diff(gf_HC$left_ct, gf_FEP$left_ct)
-avg_diff_right_ct<- average_rank_diff(gf_HC$right_ct, gf_FEP$right_ct)
-
-avg_diff_left_ct<- average_rank_diff(gf_HC$left_ct_30, gf_FEP$left_ct_30)
-avg_diff_right_ct<- average_rank_diff(gf_HC$right_ct_30, gf_FEP$right_ct_30)
-
-writeVertex(avg_diff_left_ct, "average_diff_left_ct.txt")
-
-#AHBA analysis
-avg_diff_left_ct_ahba <- ahba_CIVET(avg_diff_left_ct$diff)
-ahba_CIVET_write("avg_diff_left_ct", avg_diff_left_ct_ahba)
-
 
 gandal <- read_tsv(file="../TOPSY_NBM_Allen/data/Science_2018.csv")
 
@@ -866,12 +656,3 @@ test <- left_join(avg_diff_left_ct_ahba, gandal, by=c("Gene"="gene_name") )
 gene.df <- bitr(gene, fromType = "ENTREZID",
         toType = c("ENSEMBL", "SYMBOL"),
         OrgDb = org.Hs.eg.db)
-
-
-#2. Individual testing
-
-#Threshold testing for main differences between HC and FEP.
-#Min and max based on min/max in average group differences
-
-gf_threshold <- subset(gf, DX=="HC" | DX=="FEP")
-gf_threshold$DX <- droplevels(gf_threshold$DX)
