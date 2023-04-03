@@ -265,6 +265,64 @@ t.test(test1$Overlap, test2$Overlap)
 summary(test1)
 summary(test2)
 
+###Cayley distance
+
+cayley_ct_left_yeo7_FBIRN <- indiv_distance_cayley_sub(data_split[[1]]$left_ct, data$left_ct, stat_maps_left$yeo7)
+cayley_ct_right_yeo7_FBIRN <- indiv_distance_cayley_sub(data_split[[1]]$right_ct, data$right_ct, stat_maps_right$yeo7)
+
+
+getLms(cayley_ct_left_vonE_HCPEP, "Age + Sex + DX", test)
+
+
+cayley_dx <- data.frame()
+cayley_cors <- data.frame()
+
+for (dataset in unique(combined_df_TOPSY$Dataset)){
+	
+	data <- subset(combined_df, Dataset==dataset)
+	data %<>% filter(DX=="HC" | DX=="FEP" | DX=="Scz")
+	data$DX <- replace(data$DX, data$DX=="FEP", "Scz")
+	data$DX %<>% droplevels()
+
+	if (dataset=="HCPEP") {
+		data %<>% filter(DX_2!="Other")
+	}
+
+	data_split <- split(data, data$DX)
+	
+	if (!exists(paste0("cayley_ct_left_yeo7_", dataset))) {
+		assign(paste0("cayley_ct_left_yeo7_", dataset), indiv_distance_cayley_sub(data_split$HC$left_ct, data$left_ct, stat_maps_left$yeo7))
+	}
+
+	if (!exists(paste0("cayley_ct_right_yeo7_", dataset))) {
+		assign(paste0("cayley_ct_right_yeo7_", dataset), indiv_distance_cayley_sub(data_split$HC$right_ct, data$right_ct, stat_maps_right$yeo7))
+	}
+
+	
+	left_dx <- getLms( get(paste0("cayley_ct_left_yeo7_",dataset)), "Age + Sex + DX", data) %>% mutate(Variable=paste0(Variable, "_left"))
+	right_dx <- getLms( get(paste0("cayley_ct_right_yeo7_",dataset)), "Age + Sex + DX", data) %>% mutate(Variable=paste0(Variable, "_right"))
+
+	cayley_dx <- rbind(cayley_dx, cbind(Dataset=dataset, left_dx))
+	cayley_dx <- rbind(cayley_dx, cbind(Dataset=dataset, right_dx))
+
+	if (dataset %in% c("BrainGluSchi", "COBRE", "HCPEP", "TOPSY")) {
+		scores <- data %>% select(starts_with(c("PANSS_")))
+	} else {
+		scores <- data %>% select(ends_with(c("_global")))
+	}
+
+	for(i in 1:ncol(scores)){
+		left_yeo <- cbind(Score=names(scores)[i], dataset, Label="Left Yeo", getCors(scores[[i]], get(paste0("cayley_ct_left_yeo7_",dataset))))
+		right_yeo <- cbind(Score=names(scores)[i], dataset, Label="Right Yeo", getCors(scores[[i]], get(paste0("cayley_ct_right_yeo7_",dataset))))
+		#left_von <- cbind(Score=names(scores)[i], dataset, Label="Left von Economo", getCors(scores[[i]], left_ct_vonEconomo))
+		#right_von <- cbind(Score=names(scores)[i], dataset, Label="Right von Economo", getCors(scores[[i]], right_ct_vonEconomo))
+
+		cayley_cors <- rbind(cayley_cors, rbind(left_yeo, right_yeo))
+	}
+	
+}
+
+
 ###5. Imaging-transcriptomics & comparison to raw CT-based testing
 
 ct_compare_ahba <- data.frame()
@@ -386,7 +444,11 @@ ahba_CIVET_write("left_ct_rank_diff_ahba", left_ct_rank_diff_ahba, "left_ct_rank
 
 ###AHBA: raw CT linear model
 vs <- vertexLm(left_ct ~ DX, data=subset(hcp, DX=="FEP" | DX=="HC"))
+
+vs <- vertexLm(left_ct ~ DX, data=subset(combined_df_TOPSY, Dataset=="COBRE"))
 vs %<>% data.frame()
+
+left_ct_raw_lm_ahba <- ahba_CIVET(vs$tvalue.DXScz)
 
 left_ct_raw_lm_ahba <- ahba_CIVET(vs$tvalue.DXFEP)
 ahba_CIVET_write("left_ct_raw_lm_ahba", left_ct_raw_lm_ahba, "left_ct_raw_lm_ahba/")

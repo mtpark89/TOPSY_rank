@@ -5,6 +5,8 @@ library(ggplot2)
 library(RMINC)
 library(matrixStats)
 library(Rankcluster)
+library(foreach)
+library(doParallel)
 
 ############
 ###Functions
@@ -324,6 +326,7 @@ indiv_distance_cayley_sub <- function(reference, sample, map) {
 	colnames(rankdiff) <- paste("cayley_",sort(unique(map)), sep="")
 	return(data.frame(rankdiff))
 }
+
 
 cayley_dist_ref <- function(reference, sample, map) {
 	#Individual rank differences based on a reference, PER DEFINED SUBREGION
@@ -669,6 +672,19 @@ getCors <- function(var, columns) {
 	colnames(datalist) <- c("Variable", "Correlation", "pvalue")
 	return(datalist)
 }
+
+getLms <- function(columns, model, df) {
+	datalist = data.frame()
+
+	for (i in 1:ncol(columns)) {
+		result <- lm(as.formula(paste(columns[i], model, sep="~")), data=df) %>% parseLm()
+		datalist <- rbind(datalist, cbind(names(columns)[i], result))
+	}
+	colnames(datalist)[1] <- "Variable"
+	return(datalist)
+}
+columns <- cayley_ct_left_yeo17_HCPEP
+model <- "Age + Sex + DX"
 
 parseGlm <- function(model) {
     modelcoef <- coef(summary(model))
