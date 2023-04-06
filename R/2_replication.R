@@ -328,6 +328,14 @@ for (dataset in unique(combined_df_TOPSY$Dataset)){
 		data %<>% filter(DX_2!="Other")
 	}
 
+
+	left <- get(paste0("cayley_ct_left_yeo7_",dataset)) %>% append_colnames(., "_left")
+	right <- get(paste0("cayley_ct_right_yeo7_",dataset)) %>% append_colnames(., "_right")
+
+	data <- cbind(data, left, right)
+
+	data %<>% filter(DX!="HC")
+
 	if (dataset %in% c("BrainGluSchi", "COBRE", "HCPEP", "TOPSY")) {
 		scores <- data %>% select(starts_with(c("PANSS_")))
 	} else {
@@ -335,22 +343,49 @@ for (dataset in unique(combined_df_TOPSY$Dataset)){
 	}
 
 
-	if ( nrow(cayley_cors %>% filter(Dataset==dataset))==0) {
+	for(i in 1:ncol(scores)){
+		yeo7 <- cbind(Score=names(scores)[i], Dataset=dataset, Label="Yeo7", getCors(scores[[i]], data %>% select(starts_with("cayley_"))))
+		#left_von <- cbind(Score=names(scores)[i], dataset, Label="Left von Economo", getCors(scores[[i]], left_ct_vonEconomo))
+		#right_von <- cbind(Score=names(scores)[i], dataset, Label="Right von Economo", getCors(scores[[i]], right_ct_vonEconomo))
 
-		for(i in 1:ncol(scores)){
-			left_yeo <- cbind(Score=names(scores)[i], Dataset=dataset, Label="Left Yeo", getCors(scores[[i]], get(paste0("cayley_ct_left_yeo7_",dataset))))
-			right_yeo <- cbind(Score=names(scores)[i], Dataset=dataset, Label="Right Yeo", getCors(scores[[i]], get(paste0("cayley_ct_right_yeo7_",dataset))))
-			#left_von <- cbind(Score=names(scores)[i], dataset, Label="Left von Economo", getCors(scores[[i]], left_ct_vonEconomo))
-			#right_von <- cbind(Score=names(scores)[i], dataset, Label="Right von Economo", getCors(scores[[i]], right_ct_vonEconomo))
-
-			cayley_cors <- rbind(cayley_cors, rbind(left_yeo, right_yeo))
-		}
+		cayley_cors <- rbind(cayley_cors, yeo7)
 	}	
 
 }
 
-###Hamming distance
+cayley_cors %>% arrange(., pvalue) %>% filter(!grepl(0, Variable))
 
+######################################
+###Repeat with representative ranks of HCs in every dataset, and used as refernece for all subjects in every dataset.
+###25, median, 75 percentiles.
+
+reference_hc_left <- data.frame()
+reference_hc_right <- data.frame()
+
+for (dataset in unique(combined_df_TOPSY$Dataset)){
+	
+	data <- subset(combined_df_TOPSY, Dataset==dataset)
+
+	data %<>% filter(DX=="HC")
+	
+	probs<-c(0.25, 0.5, 0.75)
+
+	left <- vertexTableRank(data$left_ct) %>% colQuantiles(probs=probs) %>% colRanks(ties.method = "first")
+	right <- vertexTableRank(data$right_ct) %>% colQuantiles(probs=probs) %>% colRanks(ties.method = "first")
+	reference_hc_left <- rbind(reference_hc_left, left)
+	reference_hc_right <- rbind(reference_hc_right, right)
+}
+
+cayley_ct_left_yeo7_quant <- indiv_distance_cayley_sub(reference_hc_left, combined_df_TOPSY$left_ct, stat_maps_left$yeo7)
+cayley_ct_right_yeo7_quant <- indiv_distance_cayley_sub(reference_hc_right, combined_df_TOPSY$right_ct, stat_maps_right$yeo7)
+
+cayley_ct_left_yeo17_quant <- indiv_distance_cayley_sub(reference_hc_left, combined_df_TOPSY$left_ct, stat_maps_left$yeo17)
+cayley_ct_right_yeo17_quant <- indiv_distance_cayley_sub(reference_hc_right, combined_df_TOPSY$right_ct, stat_maps_right$yeo17)
+
+cayley_ct_left_vonE_quant <- indiv_distance_cayley_sub(reference_hc_left, combined_df_TOPSY$left_ct, stat_maps_left$vonEconomo)
+cayley_ct_right_vonE_quant <- indiv_distance_cayley_sub(reference_hc_right, combined_df_TOPSY$right_ct, stat_maps_right$vonEconomo)
+
+###Hamming distance
 
 cayley_ct_left_yeo7_FBIRN <- indiv_distance_cayley_sub(data_split[[1]]$left_ct, data$left_ct, stat_maps_left$yeo7)
 cayley_ct_right_yeo7_FBIRN <- indiv_distance_cayley_sub(data_split[[1]]$right_ct, data$right_ct, stat_maps_right$yeo7)
@@ -367,11 +402,6 @@ test_left <- indiv_distance_cayley(test_split$HC$left_ct, test$left_ct, stat_map
 
  refset<- vertexTableRank(test_split$HC$left_ct)
   testset<- vertexTableRank(test$left_ct)
-
-
-###Repeat above, but get representative ranks of HCs in every dataset, and use as refernece for all subjects in every dataset.
-
-
 
 
 ###Median rank correlation comparisons

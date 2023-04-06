@@ -289,13 +289,23 @@ indiv_distance_cayley_sub <- function(reference, sample, map) {
 	#Individual rank differences based on a reference dataset, PER DEFINED SUBREGION
 	#indiv_distance_kendall_sub(gf_HC$left_CT, gf$left_CT, stat_maps_left$yeo7) for example.
 
-	refset<- vertexTableRank(reference)
+	#Checks reference input type
+	#If character (df$left_ct), then read in as ranks.
+	#Rows are subjects, and columns are vertices
+	if (typeof(reference)=="character") {
+		refset<- vertexTableRank(reference)
+	}
+	
+	#If integer (already ranked: output of row/colRanks functions), then assign to refset.
+	if (typeof(reference)=="integer") {
+		refset<- reference
+	}
+	
 	testset<- vertexTableRank(sample)
 
 	rankdiff <- matrix(nrow=nrow(testset), ncol=length(unique(map)))
 
 	total=length(rankdiff)
-	modulo <- 10 * round(total / 100 / 10)
 	count=0
 		
 	for (i in 1: length(unique(map))) {
@@ -312,7 +322,7 @@ indiv_distance_cayley_sub <- function(reference, sample, map) {
 		
 			count=count+1
 		
-			if (count%%modulo == 0 || count ==total) {
+			if (count > 0) {
 				cat("\r")
 				cat("Progress: ", round(count / total * 100), "%")
 			}
@@ -324,6 +334,8 @@ indiv_distance_cayley_sub <- function(reference, sample, map) {
 	colnames(rankdiff) <- paste("cayley_",sort(unique(map)), sep="")
 	return(data.frame(rankdiff))
 }
+
+
 
 
 cayley_dist_ref <- function(reference, sample, map) {
