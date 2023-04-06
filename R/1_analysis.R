@@ -397,21 +397,11 @@ cayley_ct_right_yeo7 %<>% append_colnames(., "_right")
 gf_cayley <- cbind(gf, cayley_ct_left_yeo7, cayley_ct_right_yeo7)
 gf_cayley_FEP <- subset(gf_cayley, DX=="FEP")
 
-summary(lm(cayley_1_left ~ Age + Sex + DX, data=gf_cayley))
-summary(lm(cayley_2_left ~ Age + Sex + DX, data=gf_cayley))
-summary(lm(cayley_3_left ~ Age + Sex + DX, data=gf_cayley))
-summary(lm(cayley_4_left ~ Age + Sex + DX, data=gf_cayley))
-summary(lm(cayley_5_left ~ Age + Sex + DX, data=gf_cayley))
-summary(lm(cayley_6_left ~ Age + Sex + DX, data=gf_cayley))
-summary(lm(cayley_7_left ~ Age + Sex + DX, data=gf_cayley))
+getLms(cayley_ct_left_yeo7, "Age + Sex + DX", gf)
+getLms(cayley_ct_left_yeo7, "Age + Sex + euler_total + DX", gf)
 
-summary(lm(cayley_1_left ~ Age + Sex + euler_total + DX, data=gf_cayley))
-summary(lm(cayley_2_left ~ Age + Sex + euler_total + DX, data=gf_cayley))
-summary(lm(cayley_3_left ~ Age + Sex + euler_total + DX, data=gf_cayley))
-summary(lm(cayley_4_left ~ Age + Sex + euler_total + DX, data=gf_cayley))
-summary(lm(cayley_5_left ~ Age + Sex + euler_total + DX, data=gf_cayley))
-summary(lm(cayley_6_left ~ Age + Sex + euler_total + DX, data=gf_cayley))
-summary(lm(cayley_7_left ~ Age + Sex + euler_total + DX, data=gf_cayley))
+getLms(cayley_ct_right_yeo7, "Age + Sex + DX", gf)
+getLms(cayley_ct_right_yeo7, "Age + Sex + euler_total + DX", gf)
 
 summary(lm(cayley_1_left ~ Age + Sex + euler_total + DX, data=subset(gf_cayley, DX=="FEP" | DX=="HC")))
 summary(lm(cayley_2_left ~ Age + Sex + euler_total + DX, data=subset(gf_cayley, DX=="FEP" | DX=="HC")))
@@ -421,21 +411,6 @@ summary(lm(cayley_5_left ~ Age + Sex + euler_total + DX, data=subset(gf_cayley, 
 summary(lm(cayley_6_left ~ Age + Sex + euler_total + DX, data=subset(gf_cayley, DX=="FEP" | DX=="HC")))
 summary(lm(cayley_7_left ~ Age + Sex + euler_total + DX, data=subset(gf_cayley, DX=="FEP" | DX=="HC")))
 
-summary(lm(cayley_1_right ~ Age + Sex + DX, data=gf_cayley))
-summary(lm(cayley_2_right ~ Age + Sex + DX, data=gf_cayley))
-summary(lm(cayley_3_right ~ Age + Sex + DX, data=gf_cayley))
-summary(lm(cayley_4_right ~ Age + Sex + DX, data=gf_cayley))
-summary(lm(cayley_5_right ~ Age + Sex + DX, data=gf_cayley))
-summary(lm(cayley_6_right ~ Age + Sex + DX, data=gf_cayley))
-summary(lm(cayley_7_right ~ Age + Sex + DX, data=gf_cayley))
-
-summary(lm(cayley_1_right ~ Age + Sex + euler_total + DX, data=gf_cayley))
-summary(lm(cayley_2_right ~ Age + Sex + euler_total + DX, data=gf_cayley))
-summary(lm(cayley_3_right ~ Age + Sex + euler_total + DX, data=gf_cayley))
-summary(lm(cayley_4_right ~ Age + Sex + euler_total + DX, data=gf_cayley))
-summary(lm(cayley_5_right ~ Age + Sex + euler_total + DX, data=gf_cayley))
-summary(lm(cayley_6_right ~ Age + Sex + euler_total + DX, data=gf_cayley))
-summary(lm(cayley_7_right ~ Age + Sex + euler_total + DX, data=gf_cayley))
 
 getCors(gf_cayley_FEP$totalP, gf_cayley_FEP[(ncol(gf_cayley_FEP)-15):ncol(gf_cayley_FEP)])
 getCors(gf_cayley_FEP$totalN, gf_cayley_FEP[(ncol(gf_cayley_FEP)-15):ncol(gf_cayley_FEP)])
@@ -462,126 +437,8 @@ plot_cayley <- ggplot(melted, aes(x=network, y=value)) + geom_boxplot(aes(colour
 ggsave("Plot_cayley.png", plot_cayley, width=8, height=5, bg="white")
 
 ########################################################
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-####AHBA
-
-expressionMatrix_MNI <- read_tsv("/projects/TOPSY_NBM_Allen/data/processed/Cortical_expressionMatrix_qc_15120genes.tsv")
-sampleAnnot_MNI <- read_tsv("/projects/TOPSY_NBM_Allen/data/processed/Cortical_expressionMatrix_annotations.tsv")
-qc_pass <- read_tsv("/projects/TOPSY_NBM_Allen/data/processed/QCpass_genes_15120.tsv")
-
-identical(colnames(expressionMatrix_MNI[2:ncol(expressionMatrix_MNI)]), sampleAnnot_MNI$uniqueID)
-identical(expressionMatrix_MNI$probe_name, qc_pass$probe_name)
-
-rownames(expressionMatrix_MNI) <- qc_pass$gene_symbol
-expressionMatrix_MNI %<>% select(-probe_name)
-
-###Correlating imaging to genetic
-vs <- as.data.frame(vs)
-vs$Vertex <- 1:nrow(vs)
-
-#cortical <- read_tsv(file = "data/Left_cortical_cors.csv")
-sampleAnnot_MNI <- left_join(sampleAnnot_MNI, cortical, by="Vertex")
-
-test<- as.data.frame(cor(t(expressionMatrix_MNI), sampleAnnot_MNI$`tvalue-Glutamate`))
-test$Gene <- rownames(test)
-test %<>% arrange(desc(V1))
-write.table(test[1:1512,] %>% select(Gene), file="test1.txt", sep="\t", row.names=F, col.names=F, quote=FALSE)
-write.table(test[(15120-1512):15120,] %>% select(Gene), file="test2.txt", sep="\t", row.names=F, col.names=F, quote=FALSE)
-
-library(lmerTest)
-
-ahba_mat <- matrix(data=NA, nrow=nrow(expressionMatrix_MNI), ncol=3)
-
-for (i in 1:nrow(expressionMatrix_MNI)){
-	model <- summary(lmer(sampleAnnot_MNI$NBM_cor ~ t(expressionMatrix_MNI[i,]) + (1|sampleAnnot_MNI$donorID), verbose=0))
-
-	ahba_mat[i,1] <- rownames(expressionMatrix_MNI)[i]
-	ahba_mat[i,2:3] <- model$coefficients[2,4:5] ###T-statistic and p-value
-}
-
-
-for (i in 1:nrow(expressionMatrix_MNI)){
-	model <- summary(lmer(sampleAnnot_MNI$NBM_cor ~ t(expressionMatrix_MNI[i,]) + (1|sampleAnnot_MNI$donorID), verbose=0))
-
-	ahba_mat[i,1] <- rownames(expressionMatrix_MNI)[i]
-	ahba_mat[i,2:3] <- model$coefficients[2,4:5] ###T-statistic and p-value
-}
-
-ahba_mat2 <- matrix(data=NA, nrow=nrow(expressionMatrix_MNI), ncol=3)
-
-for (i in 1:nrow(expressionMatrix_MNI)){
-	model <- summary(lmer(sampleAnnot_MNI$Ch123_cor ~ t(expressionMatrix_MNI[i,]) + (1|sampleAnnot_MNI$donorID), verbose=0))
-	ahba_mat2[i,1] <- rownames(expressionMatrix_MNI)[i]
-	ahba_mat2[i,2:3] <- model$coefficients[2,4:5] ###T-statistic and p-value
-}
-
-colnames(ahba_mat) <- c("Gene", "tstat", "pval")
-colnames(ahba_mat2) <- c("Gene", "tstat", "pval")
-
-write.table(ahba_mat, file="results/AHBA_NBM-cortical_backup_20210409.csv", sep=",", row.names=F)
-write.table(ahba_mat2, file="results/AHBA_DB-cortical_backup_20210409.csv", sep=",", row.names=F)
-
-
 ###Correlate with gandal transcriptome results?
 
 gandal <- read_tsv(file="../TOPSY_NBM_Allen/data/Science_2018.csv")
 
 test <- left_join(left_ct_rank_diff_ahba, gandal, by=c("Gene"="gene_name") )
-
-
-
-###DKT
-dkt_labels <- read.csv('/projects/Templates/CIVET_resources/icbm/DKT/DKTatlas40.labels', sep=" ", header=FALSE)
-dkt_left <- read.csv('/projects/Templates/CIVET_resources/icbm/DKT/icbm_avg_mid_mc_dkt40_left_40962.txt', sep=" ", header=FALSE)
-dkt_right <- read.csv('/projects/Templates/CIVET_resources/icbm/DKT/icbm_avg_mid_mc_dkt40_right_40962.txt', sep=" ", header=FALSE)
-colnames(dkt_labels)[2]<- "subregion"
-
-results_dkt <- join(dkt_labels, stats_1)
-
-results_dkt <- join(dkt_right, results_dkt)
-
-results_dkt$subregion<- NULL
-
-mni.write.vertex.stats(results_dkt, file="DKT_results_right_20200926.vertstats", headers=TRUE)
-
-
-results_dkt <- join(dkt_labels, stats_1)
-
-results_dkt <- join(dkt_left, results_dkt)
-
-results_dkt$subregion<- NULL
-
-mni.write.vertex.stats(results_dkt, file="DKT_results_left_20200926.vertstats", headers=TRUE)
-
-

@@ -5,8 +5,6 @@ library(ggplot2)
 library(RMINC)
 library(matrixStats)
 library(Rankcluster)
-library(foreach)
-library(doParallel)
 
 ############
 ###Functions
@@ -297,7 +295,7 @@ indiv_distance_cayley_sub <- function(reference, sample, map) {
 	rankdiff <- matrix(nrow=nrow(testset), ncol=length(unique(map)))
 
 	total=length(rankdiff)
-	modulo=10
+	modulo <- 10 * round(total / 100 / 10)
 	count=0
 		
 	for (i in 1: length(unique(map))) {
@@ -314,9 +312,9 @@ indiv_distance_cayley_sub <- function(reference, sample, map) {
 		
 			count=count+1
 		
-			if (count%%modulo == 0) {
-				cat(format((count/total) * 100, digits = 3))
-				cat("%  ")
+			if (count%%modulo == 0 || count ==total) {
+				cat("\r")
+				cat("Progress: ", round(count / total * 100), "%")
 			}
 		
 		}
@@ -570,6 +568,90 @@ average_vertex_diff <- function(reference, sample) {
     return(output)
 }
 
+
+
+getSums <- function(vtable, map) 
+{
+	datalist = list()
+	for (i in 1: length(unique(map))) {
+		label <- sort(unique(map))[i]
+		means <- colSums(vtable[map==label,])
+		datalist[[i]] <- means
+	}
+	output <- datalist %<>% as.data.frame()
+	colnames(output) <-  sort(unique(map))
+	
+	return(output)
+}
+
+getMedians <- function(vtable, map) 
+{
+	datalist = list()
+	for (i in 1: length(unique(map))) {
+		label <- sort(unique(map))[i]
+		means <- colMedians(vtable[map==label,])
+		datalist[[i]] <- means
+	}
+	output <- datalist %<>% as.data.frame()
+	colnames(output) <-  sort(unique(map))
+	
+	return(output)
+}
+
+
+getCors <- function(var, columns) {
+	datalist = data.frame()
+
+	for (i in 1:ncol(columns)) {
+		test <- cor.test(var, columns[,i])
+
+		datalist <- rbind(datalist, cbind(colnames(columns)[i], test$estimate, test$p.value))
+	}
+	colnames(datalist) <- c("Variable", "Correlation", "pvalue")
+	return(datalist)
+}
+
+getLms <- function(columns, model, df) {
+	datalist = data.frame()
+
+	for (i in 1:ncol(columns)) {
+		result <- lm(as.formula(paste(columns[i], model, sep="~")), data=df) %>% parseLm()
+		datalist <- rbind(datalist, cbind(names(columns)[i], result))
+	}
+	colnames(datalist)[1] <- "Variable"
+	return(datalist)
+}
+
+parseGlm <- function(model) {
+    modelcoef <- coef(summary(model))
+    #rsquared <- summary(model)[[9]]
+    #fstatistic <- as.numeric(summary(model)[[10]][1])
+    #DF<- model$df.residual
+    
+    rows <- nrow(modelcoef)
+    cols <- ncol(modelcoef)
+    
+    betacolnames= paste("odds_", rownames(modelcoef)[2:rows], sep="")
+    secolnames= paste("se_", rownames(modelcoef)[2:rows], sep="")
+    tcolnames= paste("z_", rownames(modelcoef)[2:rows], sep="")
+    pcolnames= paste("p_", rownames(modelcoef)[2:rows], sep="")
+    
+    AIC<- model$aic
+    dev<- model$deviance
+    df<- model$df.residual
+    output=cbind(AIC, dev, df)
+    
+    a<-c(1,2,3,4)
+    for (i in a){
+        for (j in 2:rows) {
+            output= cbind(output, modelcoef[j,i])
+        }
+    }
+    
+    colnames(output) <- c("AIC","Dev","DF", betacolnames, secolnames, tcolnames, pcolnames)
+    return(as.data.frame(output))
+}
+
 #####AHBA analysis
 
 ahba_CIVET <- function(data) {
@@ -630,115 +712,4 @@ ahba_CIVET_write <- function(name, mat, output) {
 		sub <- subset(mat, decile_pval==decile)
 		write.table(sub$Gene, file=paste(output, paste(name, "decile_pval", decile, "genes.txt", sep="_"), paste=""), sep="\t", row.names=F, col.names=F, quote=FALSE)
 	}
-}
-
-getSums <- function(vtable, map) 
-{
-	datalist = list()
-	for (i in 1: length(unique(map))) {
-		label <- sort(unique(map))[i]
-		means <- colSums(vtable[map==label,])
-		datalist[[i]] <- means
-	}
-	output <- datalist %<>% as.data.frame()
-	colnames(output) <-  sort(unique(map))
-	
-	return(output)
-}
-
-getMedians <- function(vtable, map) 
-{
-	datalist = list()
-	for (i in 1: length(unique(map))) {
-		label <- sort(unique(map))[i]
-		means <- colMedians(vtable[map==label,])
-		datalist[[i]] <- means
-	}
-	output <- datalist %<>% as.data.frame()
-	colnames(output) <-  sort(unique(map))
-	
-	return(output)
-}
-
-
-getCors <- function(var, columns) {
-	datalist = data.frame()
-
-	for (i in 1:ncol(columns)) {
-		test <- cor.test(var, columns[,i])
-
-		datalist <- rbind(datalist, cbind(colnames(columns)[i], test$estimate, test$p.value))
-	}
-	colnames(datalist) <- c("Variable", "Correlation", "pvalue")
-	return(datalist)
-}
-
-getLms <- function(columns, model, df) {
-	datalist = data.frame()
-
-	for (i in 1:ncol(columns)) {
-		result <- lm(as.formula(paste(columns[i], model, sep="~")), data=df) %>% parseLm()
-		datalist <- rbind(datalist, cbind(names(columns)[i], result))
-	}
-	colnames(datalist)[1] <- "Variable"
-	return(datalist)
-}
-columns <- cayley_ct_left_yeo17_HCPEP
-model <- "Age + Sex + DX"
-
-parseGlm <- function(model) {
-    modelcoef <- coef(summary(model))
-    #rsquared <- summary(model)[[9]]
-    #fstatistic <- as.numeric(summary(model)[[10]][1])
-    #DF<- model$df.residual
-    
-    rows <- nrow(modelcoef)
-    cols <- ncol(modelcoef)
-    
-    betacolnames= paste("odds_", rownames(modelcoef)[2:rows], sep="")
-    secolnames= paste("se_", rownames(modelcoef)[2:rows], sep="")
-    tcolnames= paste("z_", rownames(modelcoef)[2:rows], sep="")
-    pcolnames= paste("p_", rownames(modelcoef)[2:rows], sep="")
-    
-    AIC<- model$aic
-    dev<- model$deviance
-    df<- model$df.residual
-    output=cbind(AIC, dev, df)
-    
-    a<-c(1,2,3,4)
-    for (i in a){
-        for (j in 2:rows) {
-            output= cbind(output, modelcoef[j,i])
-        }
-    }
-    
-    colnames(output) <- c("AIC","Dev","DF", betacolnames, secolnames, tcolnames, pcolnames)
-    return(as.data.frame(output))
-}
-
-
-###Single-subject correlations with AHBA
-ahba_CIVET_cor <- function(data) {
-	#Data is left cortex data in MNI space (CIVET)
-	#left_ct, for example, imported using vertexTable
-	#Transposed so nrow=subjects, ncol=vertices
-	#Here, using residualized values (age and sex), using residual_vt
-
-	ahba <- read.csv('/projects/Allen_to_CIVET/Analysis_mapping/Donors_cortex_20200823.csv', sep="\t")
-
-	output <- data.frame(NULL)
-
-	for (i in 1:nrow(data)) {
-		subj <- as.data.frame(data[i,])
-		subj %<>% as.data.frame %>% set_colnames("data")
-		subj$Vertex <- 1:nrow(subj)
-
-		merged <- merge(subj, ahba, select="Vertex", all.y=TRUE)
-		#nrow(merged) #1236 vertices to samples
-
-		data_cor <- cor(merged[ ,25:ncol(merged)], merged$data)
-		output <- rbind(output, t(data_cor))
-	}
-
-	return(output)
 }
