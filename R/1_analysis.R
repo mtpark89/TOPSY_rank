@@ -194,12 +194,10 @@ right_ct_rank_diff <- average_rank_diff_permute(gf_HC$right_ct, gf_FEP$right_ct,
 writeVertex(left_ct_rank_diff, "results/left_ct_rank_diff.vertstats")
 writeVertex(right_ct_rank_diff, "results/right_ct_rank_diff.vertstats")
 
-ggqqplot(left_ct_rank_diff$diff)
-
+#Plotting left & right hemisphere rank differences histogram
 left_ct_rank_diff$hemi <- "Left CT"
 right_ct_rank_diff$hemi <- "Right CT"
 
-#Plotting left & right hemisphere rank differences histogram
 ct_rank_diff <- rbind(left_ct_rank_diff, right_ct_rank_diff)
 
 sd(ct_rank_diff$diff) #SD is 1648.211, *2 is 3296.
@@ -210,88 +208,6 @@ plot_histo <- ggplot(ct_rank_diff, aes(x=diff, group=hemi, fill=hemi)) + geom_de
 	geom_vline(xintercept=3296, linetype="dashed", colour="darkgray", size=2) + geom_vline(xintercept=-3296, linetype="dashed", colour="darkgray", size=2)
 
 ggsave("Plot_histo_mean_rankdiff.png", plot_histo, width=5, height=5, bg="white")
-
-###5. Imaging-transcriptomics & comparison to raw CT-based testing
-
-###Compare number of significant genes
-###Enrichment using significant genes only vs. 10%, and compare
-###DAVID: write out Entrez and
-
-###AHBA: ranked CT
-left_ct_rank_diff_ahba <- ahba_CIVET(left_ct_rank_diff$diff)
-ahba_CIVET_write("left_ct_rank_diff_ahba", left_ct_rank_diff_ahba, "left_ct_rank_diff_ahba/")
-
-###AHBA: raw CT linear model
-vs <- vertexLm(left_ct ~ DX, data=subset(gf, DX=="FEP" | DX=="HC"))
-vs %<>% data.frame()
-
-left_ct_raw_lm_ahba <- ahba_CIVET(vs$tvalue.DXFEP)
-ahba_CIVET_write("left_ct_raw_lm_ahba", left_ct_raw_lm_ahba, "left_ct_raw_lm_ahba/")
-
-###AHBA: raw CT using mean CT & subtraction
-
-left_ct_raw_meandiff <- average_vertex_diff(gf_HC$left_ct, gf_FEP$left_ct)
-writeVertex(left_ct_raw_meandiff, file="results/left_ct_raw_meandiff.vertstats")
-
-left_ct_raw_meandiff_ahba <- ahba_CIVET(left_ct_raw_meandiff$diff)
-ahba_CIVET_write("left_ct_raw_meandiff_ahba", left_ct_raw_meandiff_ahba, "left_ct_raw_meandiff_ahba/")
-
-###Toppgene results per decile (1 and 10): DisGeNEt curated
-
-toppgene_rank_dec10 <- read_tsv("left_ct_rank_diff_ahba/ToppGene_rank_decile10_tstat.txt")
-toppgene_rawlm_dec10 <- read_tsv("left_ct_raw_lm_ahba/ToppGene_rawlm_decile10_tstat.txt")
-toppgene_meandiff_dec10 <- read_tsv("left_ct_raw_meandiff_ahba/ToppGene_meandiff_decile10_tstat.txt")
-
-toppgene_rank_dec1 <- read_tsv("left_ct_rank_diff_ahba/ToppGene_rank_decile1_tstat.txt")
-toppgene_rawlm_dec1 <- read_tsv("left_ct_raw_lm_ahba/ToppGene_rawlm_decile1_tstat.txt")
-toppgene_meandiff_dec1 <- read_tsv("left_ct_raw_meandiff_ahba/ToppGene_meandiff_decile1_tstat.txt")
-
-toppgene_rank_dec1$rank <- 1:nrow(toppgene_rank_dec1)
-toppgene_rawlm_dec1$rank <- 1:nrow(toppgene_rawlm_dec1)
-toppgene_meandiff_dec1$rank <- 1:nrow(toppgene_meandiff_dec1)
-
-toppgene_rank_dec10$rank <- 1:nrow(toppgene_rank_dec10)
-toppgene_rawlm_dec10$rank <- 1:nrow(toppgene_rawlm_dec10)
-toppgene_meandiff_dec10$rank <- 1:nrow(toppgene_meandiff_dec10)
-
-toppgene_rank_dec1$Method <- "Rank"
-toppgene_rawlm_dec1$Method <- "CT-linear model"
-toppgene_meandiff_dec1$Method <- "CT-difference"
-
-toppgene_rank_dec10$Method <- "Rank"
-toppgene_rawlm_dec10$Method <- "CT-linear model"
-toppgene_meandiff_dec10$Method <- "CT-difference"
-
-toppgene_dec1 <- rbind(toppgene_rank_dec1, toppgene_rawlm_dec1)
-toppgene_dec10 <- rbind(toppgene_rank_dec10, toppgene_rawlm_dec10)
-
-toppgene_dec1 %<>% mutate(scz = case_when(Name=="Schizophrenia" ~ "Schizophrenia"))
-toppgene_dec10 %<>% mutate(scz = case_when(Name=="Schizophrenia" ~ "Schizophrenia"))
-
-toppgene_dec1 %<>% mutate(pointsize = case_when(Name=="Schizophrenia" ~ 2, Name!="Schizophrenia" ~ 1))
-toppgene_dec10 %<>% mutate(pointsize = case_when(Name=="Schizophrenia" ~ 2, Name!="Schizophrenia" ~ 1))
-
-plot_dec1 <- ggplot(subset(toppgene_dec1, rank < 50), aes(x=rank, y=-log10(`p-value`), group=Method, colour=Method)) + 
-	geom_point(size=2) + theme_minimal() +
-	xlab("Rank") + ylab("-log10(p value)") +
-	geom_hline(yintercept=-log10(0.05/2600), linetype="dashed", colour="darkgray", size=2) +
-	theme(text=element_text(size=22, family="Helvetica"), axis.text.x=element_text(hjust=0.35), axis.text=element_text(size=16))
-
-plot_dec10 <- ggplot(subset(toppgene_dec10, rank < 50), aes(x=rank, y=-log10(`p-value`), group=Method, colour=Method)) + 
-	geom_point(size=2) + theme_minimal() +
-	xlab("Rank") + ylab("-log10(p value)") +
-	geom_hline(yintercept=-log10(0.05/2600), linetype="dashed", colour="darkgray", size=2) +
-	theme(text=element_text(size=22, family="Helvetica"), axis.text.x=element_text(hjust=0.35), axis.text=element_text(size=16))
-
-write.table(subset(toppgene_dec1, Name=="Schizophrenia"), file="figures/toppgene_dec1.csv", sep="\t", row.names=F)
-write.table(subset(toppgene_dec10, Name=="Schizophrenia"), file="figures/toppgene_dec10.csv", sep="\t", row.names=F)
-
-write.table(toppgene_dec1, file="results/toppgene_dec1.csv", sep="\t", row.names=F)
-write.table(toppgene_dec10, file="results/toppgene_dec10.csv", sep="\t", row.names=F)
-
-###2600 annotations for Bonferroni
-
-ggsave("figures/Plot_toppgene_deciles_comparison.png", ggarrange(plot_dec1, plot_dec10, ncol=2, common.legend = TRUE, legend="bottom"), width=10, height=5, bg="white")
 
 ###6. Median rank testing
 
@@ -315,10 +231,15 @@ gf_medians_FEP <- subset(gf_medians, DX=="FEP")
 
 ##################################################
 
-getCors(gf_medians_FEP$totalP, gf_medians_FEP[(ncol(gf_medians_FEP)-15):ncol(gf_medians_FEP)])
-getCors(gf_medians_FEP$totalN, gf_medians_FEP[(ncol(gf_medians_FEP)-15):ncol(gf_medians_FEP)])
-getCors(gf_medians_FEP$WksTo50P, gf_medians_FEP[(ncol(gf_medians_FEP)-15):ncol(gf_medians_FEP)])
-getCors(gf_medians_FEP$WksToCGI2, gf_medians_FEP[(ncol(gf_medians_FEP)-15):ncol(gf_medians_FEP)])
+getCors(gf_medians_FEP$totalP, gf_medians_FEP %>% select(ends_with(c("_left", "_right")))) %>% write_tsv(., "results/results_correlations_median_totalP.tsv")
+getCors(gf_medians_FEP$totalN, gf_medians_FEP %>% select(ends_with(c("_left", "_right")))) %>% write_tsv(., "results/results_correlations_median_totalN.tsv")
+getCors(gf_medians_FEP$WksTo50P, gf_medians_FEP %>% select(ends_with(c("_left", "_right")))) %>% write_tsv(., "results/results_correlations_median_WksTo50P.tsv")
+getCors(gf_medians_FEP$WksToCGI2, gf_medians_FEP %>% select(ends_with(c("_left", "_right")))) %>% write_tsv(., "results/results_correlations_median_WksToCGI2.tsv")
+
+getLms(gf_medians_FEP %>% select(ends_with(c("_left", "_right"))), "Age + Sex + euler_total + totalP", gf_medians_FEP)
+getLms(gf_medians_FEP %>% select(ends_with(c("_left", "_right"))), "Age + Sex + euler_total + totalN", gf_medians_FEP)
+getLms(gf_medians_FEP %>% select(ends_with(c("_left", "_right"))), "Age + Sex + euler_total + WksTo50P", gf_medians_FEP)
+getLms(gf_medians_FEP %>% select(ends_with(c("_left", "_right"))), "Age + Sex + euler_total + WksToCGI2", gf_medians_FEP)
 
 summary(lm(gf_medians_FEP$DorsalAtt_left ~ Age + Sex + euler_total + WksToCGI2, data=gf_medians_FEP))
 summary(lm(gf_medians_FEP$DorsalAtt_right ~ Age + Sex + euler_total + WksToCGI2, data=gf_medians_FEP))
@@ -327,12 +248,12 @@ melted <- melt(gf_medians_FEP %>% select(DorsalAtt_left, DorsalAtt_right, WksToC
 melted$hemisphere <-gsub('DorsalAtt_left', 'Left',
 		gsub('DorsalAtt_right', 'Right', melted$hemisphere))
 
-plot_cgi <-ggplot(melted, aes(x=value, y=WksToCGI2, group=hemisphere, colour=hemisphere)) + 
+plot_cgi <- ggplot(melted, aes(x=value, y=WksToCGI2, group=hemisphere, colour=hemisphere)) + 
     geom_point(size=2) + theme_minimal() + geom_smooth(method=lm, size=2) +
     xlab("Median rank: Dorsal Attention network") + ylab("Weeks to reach CGI-S score 2") +
-    theme(text=element_text(size=18, family="Helvetica"), axis.text.x=element_text(hjust=0.35), axis.text=element_text(size=14), legend.title=element_blank(), legend.position = "bottom")
+    theme(text=element_text(size=18, family="Helvetica"), axis.text.x=element_text(hjust=0.35), axis.text=element_text(size=14), legend.title=element_blank(), legend.position = "NONE")
 
-ggsave("Plot_cgi_dorsal.png", plot_cgi, width=6, height=5, bg="white")
+ggsave("figures/Plot_cgi_dorsal.png", plot_cgi, width=6, height=5, bg="white")
 
 summary(lm(gf_medians_FEP$Default_left ~ Age + Sex + euler_total + totalP, data=gf_medians_FEP))
 
@@ -341,8 +262,11 @@ plot_totalP <- ggplot(gf_medians_FEP, aes(x=Default_left, y=totalP)) +
 	xlab("Median rank: Default network") + ylab("Total positive symptoms") +
 	theme(text=element_text(size=18, family="Helvetica"), axis.text.x=element_text(hjust=0.35), axis.text=element_text(size=14), legend.title=element_blank())
 
-ggsave("Plot_totalP.png", plot_totalP, width=6, height=5, bg="white")
+ggsave("figures/Plot_totalP.png", plot_totalP, width=6, height=5, bg="white")
 
+plot_TOPSY_medians <- ggarrange(plot_totalP, plot_cgi, ncol=2)
+
+ggsave("figures/Plot_TOPSY_medians_totalP_CGI.png", plot_TOPSY_medians, width=10, height=5, bg="white")
 ####################################
 ###Comparison: raw cortical thickness & network medians
 
@@ -355,10 +279,10 @@ right_ct_yeo <- getMedians(right_ct, stat_maps_right$yeo7)
 gf_medians_raw <- cbind(gf, left_ct_yeo, right_ct_yeo)
 gf_medians_raw_FEP <- subset(gf_medians_raw, DX=="FEP")
 
-getCors(gf_medians_raw_FEP$totalP, gf_medians_raw_FEP[(ncol(gf_medians_raw_FEP)-15):ncol(gf_medians_raw_FEP)])
-getCors(gf_medians_raw_FEP$totalN, gf_medians_raw_FEP[(ncol(gf_medians_raw_FEP)-15):ncol(gf_medians_raw_FEP)])
-getCors(gf_medians_raw_FEP$WksTo50P, gf_medians_raw_FEP[(ncol(gf_medians_raw_FEP)-15):ncol(gf_medians_raw_FEP)])
-getCors(gf_medians_raw_FEP$WksToCGI2, gf_medians_raw_FEP[(ncol(gf_medians_raw_FEP)-15):ncol(gf_medians_raw_FEP)])
+getCors(gf_medians_raw_FEP$totalP, gf_medians_raw_FEP %>% select(ends_with(c("_left", "_right"))) )
+getCors(gf_medians_raw_FEP$totalN, gf_medians_raw_FEP %>% select(ends_with(c("_left", "_right"))) )
+getCors(gf_medians_raw_FEP$WksTo50P, gf_medians_raw_FEP %>% select(ends_with(c("_left", "_right"))) )
+getCors(gf_medians_raw_FEP$WksToCGI2, gf_medians_raw_FEP %>% select(ends_with(c("_left", "_right"))) )
 
 ###Plotting for comparison
 gf_medians_FEP$Method <- "CT-ranked"
@@ -430,11 +354,11 @@ melted$value %<>% as.numeric()
 melted$network <-gsub('cayley_2_left', 'Left Somatomotor',
 		gsub('cayley_3_left', 'Left Dorsal Attention', melted$network))
 
-plot_cayley <- ggplot(melted, aes(x=network, y=value)) + geom_boxplot(aes(colour=DX)) + geom_point(aes(colour=DX), size=3, position=position_jitterdodge()) + theme_minimal() + facet_wrap( ~ network, scales="free") +
-	xlab("") + ylab("Cayley distance") +
-	theme(text=element_text(size=18, family="Helvetica"), axis.text.x=element_text(hjust=0.35), axis.text=element_text(size=14), legend.title=element_blank(), legend.position = "bottom", strip.text.x=element_blank(), axis.title.x=element_blank())
+plot_cayley <- ggplot(melted, aes(x=network, y=value, colour=DX)) + geom_boxplot() + geom_point(aes(colour=DX), size=3, position=position_jitterdodge()) + theme_minimal() + facet_wrap( ~ network, scales="free") +
+    xlab("") + ylab("Cayley distance") +
+    theme(text=element_text(size=18, family="Helvetica"), axis.text.x=element_text(hjust=0.35), axis.text=element_text(size=14), legend.title=element_blank(), legend.position = "bottom", strip.text.x=element_blank(), axis.title.x=element_blank()) + scale_color_brewer(palette="Set1")
 
-ggsave("Plot_cayley.png", plot_cayley, width=8, height=5, bg="white")
+ggsave("figures/Plot_cayley.png", plot_cayley, width=10, height=5, bg="white")
 
 ########################################################
 ###Correlate with gandal transcriptome results?

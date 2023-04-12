@@ -173,6 +173,28 @@ pairwise_similarity <- function(df) {
 	return(result)
 }
 
+pairwise_cors <- function(df) {
+	
+	result <- data.frame()
+
+	for (i in 1:(ncol(df)-1)) {
+		colA <- colnames(df)[i] #Main column to be comparing against
+		
+		for (j in (i+1):ncol(df)){
+			colB <- colnames(df)[j] #Second column being compared
+			
+			
+			
+
+			result <- rbind(result, cbind(colA, colB, cor(df[,i], df[,j])))
+		}
+	}
+	
+	colnames(result) <- c("ColA", "ColB", "Cors")
+	result %<>% mutate_at(vars("Cors"), as.numeric)
+	return(result)
+}
+
 
 indiv_rankdiff <- function(reference, sample) {
 	#Individual rank differences based on a reference dataset

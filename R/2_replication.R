@@ -265,7 +265,7 @@ t.test(test1$Overlap, test2$Overlap)
 summary(test1)
 summary(test2)
 
-###Cayley distance testing per dataset.
+###Cayley distance testing per dataset, network distance ~ Age + Sex + DX
 
 cayley_dx <- data.frame()
 
@@ -295,13 +295,11 @@ for (dataset in unique(combined_df_TOPSY$Dataset)){
 	}
 	
 
-	if ( nrow(cayley_dx %>% filter(Dataset==dataset))==0) {
 	left_dx <- getLms( get(paste0("cayley_ct_left_yeo7_",dataset)), "Age + Sex + DX", data) %>% mutate(Variable=paste0(Variable, "_left"))
 	right_dx <- getLms( get(paste0("cayley_ct_right_yeo7_",dataset)), "Age + Sex + DX", data) %>% mutate(Variable=paste0(Variable, "_right"))
 
 	cayley_dx <- rbind(cayley_dx, cbind(Dataset=dataset, Label="Left Yeo", left_dx))
 	cayley_dx <- rbind(cayley_dx, cbind(Dataset=dataset, Label="Right Yeo", right_dx))
-	}
 
 	temp_left <- get(paste0("cayley_ct_left_yeo7_",dataset))
 	temp_right <- get(paste0("cayley_ct_right_yeo7_",dataset))
@@ -353,6 +351,7 @@ for (dataset in unique(combined_df_TOPSY$Dataset)){
 
 }
 
+cayley_cors %<>% mutate_at(vars(starts_with(c("Correlation", "pvalue"))), as.numeric)
 cayley_cors %>% arrange(., pvalue) %>% filter(!grepl(0, Variable))
 
 ######################################
@@ -385,38 +384,106 @@ cayley_ct_right_yeo17_quant <- indiv_distance_cayley_sub(reference_hc_right, com
 cayley_ct_left_vonE_quant <- indiv_distance_cayley_sub(reference_hc_left, combined_df_TOPSY$left_ct, stat_maps_left$vonEconomo)
 cayley_ct_right_vonE_quant <- indiv_distance_cayley_sub(reference_hc_right, combined_df_TOPSY$right_ct, stat_maps_right$vonEconomo)
 
-###Hamming distance
 
-cayley_ct_left_yeo7_FBIRN <- indiv_distance_cayley_sub(data_split[[1]]$left_ct, data$left_ct, stat_maps_left$yeo7)
-cayley_ct_right_yeo7_FBIRN <- indiv_distance_cayley_sub(data_split[[1]]$right_ct, data$right_ct, stat_maps_right$yeo7)
-getLms(cayley_ct_left_vonE_HCPEP, "Age + Sex + DX", test)
+###
+combined_df_TOPSY_quant <- cbind(combined_df_TOPSY, cayley_ct_left_yeo7_quant %>% append_colnames(., "_yeo7_left"), cayley_ct_right_yeo7_quant %>% append_colnames(., "_yeo7_right"))
+
+###Age correlations?
+getCors(combined_df_TOPSY_quant$Age, combined_df_TOPSY_quant %>% select(starts_with("cayley_")))
+
+###Cayley distance (using quatile ranks across all datasets) testing per dataset, network distance ~ Age + Sex + DX
+cayley_dx_quant <- data.frame()
+
+for (dataset in unique(combined_df_TOPSY_quant$Dataset)){
+	
+	data <- subset(combined_df_TOPSY_quant, Dataset==dataset)
+
+	cat("\n")
+	cat(dataset)
+
+	data %<>% filter(DX=="HC" | DX=="FEP" | DX=="Scz")
+	data$DX <- replace(data$DX, data$DX=="FEP", "Scz")
+	data$DX %<>% droplevels()
+
+	if (dataset=="HCPEP") {
+		data %<>% filter(DX_2!="Other")
+	}
+
+	left_dx <- getLms(data %>% select(starts_with("cayley_")) %>% select(ends_with("left")), "Age + Sex + DX", data) #%>% mutate(Variable=paste0(Variable, "_left"))
+	right_dx <- getLms(data %>% select(starts_with("cayley_")) %>% select(ends_with("right")), "Age + Sex + DX", data) #%>% mutate(Variable=paste0(Variable, "_right"))
+
+	cayley_dx_quant <- rbind(cayley_dx_quant, cbind(Dataset=dataset, Label="Left Yeo", left_dx))
+	cayley_dx_quant <- rbind(cayley_dx_quant, cbind(Dataset=dataset, Label="Right Yeo", right_dx))
+}
+
+combined_df_TOPSY_quant_yeo17 <- cbind(combined_df_TOPSY, cayley_ct_left_yeo17_quant %>% append_colnames(., "_yeo7_left"), cayley_ct_right_yeo17_quant %>% append_colnames(., "_yeo7_right"))
+
+cayley_dx_quant_yeo17 <- data.frame()
+
+for (dataset in unique(combined_df_TOPSY_quant_yeo17$Dataset)){
+	
+	data <- subset(combined_df_TOPSY_quant_yeo17, Dataset==dataset)
+
+	cat("\n")
+	cat(dataset)
+
+	data %<>% filter(DX=="HC" | DX=="FEP" | DX=="Scz")
+	data$DX <- replace(data$DX, data$DX=="FEP", "Scz")
+	data$DX %<>% droplevels()
+
+	if (dataset=="HCPEP") {
+		data %<>% filter(DX_2!="Other")
+	}
+
+	left_dx <- getLms(data %>% select(starts_with("cayley_")) %>% select(ends_with("left")), "Age + Sex + DX", data) #%>% mutate(Variable=paste0(Variable, "_left"))
+	right_dx <- getLms(data %>% select(starts_with("cayley_")) %>% select(ends_with("right")), "Age + Sex + DX", data) #%>% mutate(Variable=paste0(Variable, "_right"))
+
+	cayley_dx_quant_yeo17 <- rbind(cayley_dx_quant_yeo17, cbind(Dataset=dataset, Label="Left Yeo", left_dx))
+	cayley_dx_quant_yeo17 <- rbind(cayley_dx_quant_yeo17, cbind(Dataset=dataset, Label="Right Yeo", right_dx))
+}
+
+###Cross-dataset comparisons of effect sizes
+
+reshape2::dcast(cayley_dx_quant %>% select(Dataset, Variable, t_DXScz),  Dataset ~ Variable)
+
+test <- reshape2::dcast(cayley_dx_quant %>% select(Dataset, Variable, t_DXScz),  Variable ~ Dataset)
+test_mat <- as.matrix(test %>% select(-Variable))
+rownames(test_mat) <- test$Variable
+pheatmap::pheatmap(test_mat)
 
 
-test <- subset(combined_df_TOPSY, Dataset=="BrainGluSchi")
-test %<>% filter(DX=="HC" | DX=="FEP" | DX=="Scz")
-test$DX  <- replace(test$DX, test$DX=="FEP", "Scz")
-test$DX  %<>% droplevels()
-test_split <- split(test, test$DX)
+rownames(test) <- test[,1]
+test <- test[,-1]
 
-test_left <- indiv_distance_cayley(test_split$HC$left_ct, test$left_ct, stat_maps_left$yeo7)
 
- refset<- vertexTableRank(test_split$HC$left_ct)
-  testset<- vertexTableRank(test$left_ct)
+test %<>% select(-Variable)
+test %<>% filter(., !grepl("0", Variable))
+summary(cor(test)[lower.tri(cor(test))])
+
+pairwise_cors(test)
+
+
+test <- reshape2::dcast(cayley_dx_quant_yeo17 %>% select(Dataset, Variable, t_DXScz),  Variable ~ Dataset)
+test_mat <- as.matrix(test %>% select(-Variable))
+rownames(test_mat) <- test$Variable
+pheatmap::pheatmap(test_mat)
 
 
 ###Median rank correlation comparisons
-###Correct for agen + gender?
 
 ct_compare_correlations <- data.frame()
+ct_compare_correlations_yeo17 <- data.frame()
 for (dataset in unique(combined_df_TOPSY$Dataset)){
 	
 	df <- subset(combined_df_TOPSY, Dataset==dataset)
 	df %<>% filter(DX=="FEP" | DX=="Scz")
 	df$DX %<>% droplevels()
 	
-	df %<>% filter(Age < 41)
-
+	#df %<>% filter(Age < 41)
 	#data_split <- split(data, data$DX)
+	if (dataset=="HCPEP") {
+		df %<>% filter(DX_2!="Other")
+	}
 	
 	left_ct_rank <- t(vertexTableRank(df$left_ct))
 	right_ct_rank <- t(vertexTableRank(df$right_ct))
@@ -424,14 +491,27 @@ for (dataset in unique(combined_df_TOPSY$Dataset)){
 	left_ct_yeo <- getMedians(left_ct_rank, stat_maps_left$yeo7)
 	right_ct_yeo <- getMedians(right_ct_rank, stat_maps_right$yeo7)
 
-	left_ct_vonEconomo <- getMedians(left_ct_rank, stat_maps_left$vonEconomo)
-	right_ct_vonEconomo <- getMedians(right_ct_rank, stat_maps_right$vonEconomo)
+	left_ct_yeo17 <- getMedians(left_ct_rank, stat_maps_left$yeo17)
+	right_ct_yeo17 <- getMedians(right_ct_rank, stat_maps_right$yeo17)
+
+	#left_ct_vonEconomo <- getMedians(left_ct_rank, stat_maps_left$vonEconomo)
+	#right_ct_vonEconomo <- getMedians(right_ct_rank, stat_maps_right$vonEconomo)
 
 	colnames(left_ct_yeo) <-  c("Unmatched_left", "Visual_left", "Somatomotor_left", "DorsalAtt_left", "VentralAtt_left", "Limbic_yeo_left", "Frontoparietal_left", "Default_left")
 	colnames(right_ct_yeo) <-  c("Unmatched_right", "Visual_right", "Somatomotor_right", "DorsalAtt_right", "VentralAtt_right", "Limbic_yeo_right", "Frontoparietal_right", "Default_right")
 
-	colnames(left_ct_vonEconomo) <-  c("Unmatched_left", "Motor_left", "Association-FP_left", "Association-FT_left", "Sensory-2_left", "Sensory-1_left", "Limbic_left", "Insular_left")
-	colnames(right_ct_vonEconomo) <-  c("Unmatched_right", "Motor_right", "Association-FP_right", "Association-FT_right", "Sensory-2_right", "Sensory-1_right", "Limbic_right", "Insular_right")
+	left_ct <- vertexTable(df$left_ct)
+	right_ct <- vertexTable(df$right_ct)
+
+	left_ct_yeo_raw <- getMedians(left_ct, stat_maps_left$yeo7)
+	right_ct_yeo_raw <- getMedians(right_ct, stat_maps_right$yeo7)
+
+	left_ct_yeo17_raw <- getMedians(left_ct, stat_maps_left$yeo17)
+	right_ct_yeo17_raw <- getMedians(right_ct, stat_maps_right$yeo17)
+
+
+	#colnames(left_ct_vonEconomo) <-  c("Unmatched_left", "Motor_left", "Association-FP_left", "Association-FT_left", "Sensory-2_left", "Sensory-1_left", "Limbic_left", "Insular_left")
+	#colnames(right_ct_vonEconomo) <-  c("Unmatched_right", "Motor_right", "Association-FP_right", "Association-FT_right", "Sensory-2_right", "Sensory-1_right", "Limbic_right", "Insular_right")
 
 	if (dataset %in% c("BrainGluSchi", "COBRE", "HCPEP", "TOPSY")) {
 		scores <- df %>% select(starts_with(c("PANSS_")))
@@ -441,37 +521,48 @@ for (dataset in unique(combined_df_TOPSY$Dataset)){
 	
 	
 	for(i in 1:ncol(scores)){
-		left_yeo <- cbind(Score=names(scores)[i], dataset, Label="Left Yeo", getCors(scores[[i]], left_ct_yeo))
-		right_yeo <- cbind(Score=names(scores)[i], dataset, Label="Right Yeo", getCors(scores[[i]], right_ct_yeo))
-		left_von <- cbind(Score=names(scores)[i], dataset, Label="Left von Economo", getCors(scores[[i]], left_ct_vonEconomo))
-		right_von <- cbind(Score=names(scores)[i], dataset, Label="Right von Economo", getCors(scores[[i]], right_ct_vonEconomo))
+		left_yeo <- cbind(Score=names(scores)[i], dataset, Label="Left Yeo", getCors(scores[[i]], left_ct_yeo), getCors(scores[[i]], left_ct_yeo_raw) %>% select(-Variable) %>% append_colnames(., "_raw"))
+		right_yeo <- cbind(Score=names(scores)[i], dataset, Label="Right Yeo", getCors(scores[[i]], right_ct_yeo), getCors(scores[[i]], right_ct_yeo_raw) %>% select(-Variable) %>% append_colnames(., "_raw"))
 
-		ct_compare_correlations <- rbind(ct_compare_correlations, rbind(left_yeo, right_yeo, left_von, right_von))
+		#left_von <- cbind(Score=names(scores)[i], dataset, Label="Left von Economo", getCors(scores[[i]], left_ct_vonEconomo))
+		#right_von <- cbind(Score=names(scores)[i], dataset, Label="Right von Economo", getCors(scores[[i]], right_ct_vonEconomo))
+
+		ct_compare_correlations <- rbind(ct_compare_correlations, rbind(left_yeo, right_yeo))
+	}
+
+	for(i in 1:ncol(scores)){
+		left_yeo <- cbind(Score=names(scores)[i], dataset, Label="Left Yeo17", getCors(scores[[i]], left_ct_yeo17), getCors(scores[[i]], left_ct_yeo17_raw) %>% select(-Variable) %>% append_colnames(., "_raw"))
+		right_yeo <- cbind(Score=names(scores)[i], dataset, Label="Right Yeo17", getCors(scores[[i]], right_ct_yeo17), getCors(scores[[i]], right_ct_yeo17_raw) %>% select(-Variable) %>% append_colnames(., "_raw"))
+
+		#left_von <- cbind(Score=names(scores)[i], dataset, Label="Left von Economo", getCors(scores[[i]], left_ct_vonEconomo))
+		#right_von <- cbind(Score=names(scores)[i], dataset, Label="Right von Economo", getCors(scores[[i]], right_ct_vonEconomo))
+
+		ct_compare_correlations_yeo17 <- rbind(ct_compare_correlations_yeo17, rbind(left_yeo, right_yeo))
 	}
 }
 
+ct_compare_correlations %<>% mutate_at(vars(starts_with(c("Correlation", "pvalue"))), as.numeric)
+ct_compare_correlations_yeo17 %<>% mutate_at(vars(starts_with(c("Correlation", "pvalue"))), as.numeric)
 
-test <-ct_compare_correlations %>% filter(Score %in% c("SAPS_global", "SANS_global", "PANSS_pos", "PANSS_neg")) %>% filter(., grepl("Yeo", Label))
-test <-ct_compare_correlations %>% filter(Score %in% c("SAPS_global", "PANSS_pos")) %>% filter(., grepl("Yeo", Label))
+test <- reshape2::dcast(ct_compare_correlations %>% filter(Score=="PANSS_pos" | Score=="SAPS_global") %>% select(dataset, Variable, Correlation),  dataset ~ Variable)
+test_mat <- test %>% select(-dataset) %>% as.matrix()
+rownames(test_mat) <- test$dataset
+pheatmap::pheatmap(test_mat)
 
-test %<>% mutate_at(vars("Correlation", "pvalue"), as.numeric)
+test <- reshape2::dcast(ct_compare_correlations %>% filter(Score=="PANSS_neg" | Score=="SANS_global") %>% select(dataset, Variable, Correlation),  dataset ~ Variable)
+test_mat <- test %>% select(-dataset) %>% as.matrix()
+rownames(test_mat) <- test$dataset
+pheatmap::pheatmap(test_mat)
 
-###Plotting: dataset (organized by median age), network-symptom correlations
-test <-ct_compare_correlations %>% filter(Score %in% c("SAPS_global", "PANSS_pos")) %>% filter(., grepl("Yeo", Label))
+test <- ct_compare_correlations %>% select(Variable, pvalue, Score, pvalue_raw) %>% melt(., id.vars=c("Score", "Variable")
+test %<>% mutate(Variable=gsub("_left|_right", "", Variable))%>% filter(Variable!="Unmatched")  %>% filter(!grepl("PANSS_total|PANSS_g", Score))
 
-test %<>% select(dataset, Correlation, Variable) %>% pivot_wider(names_from = Variable, values_from=Correlation)
+ggplot(test, aes(x=Variable, y=-log10(value), color=Score)) + geom_point(position=position_dodge(0.5), size=2) + facet_wrap(~variable, ncol=2)
 
-test2 <- test %>% select(-dataset) %>% mutate_all(as.numeric) %>% as.matrix()
-rownames(test2) <- test$dataset
+ggplot(test, aes(x=Variable, y=-log10(value), color=variable)) + geom_point(position=position_dodge(0.5), size=2) + facet_wrap(~variable, ncol=2)
 
 
-test <-ct_compare_correlations %>% filter(Score %in% c("SANS_global", "PANSS_neg")) %>% filter(., grepl("Yeo", Label))
-
-test %<>% select(dataset, Correlation, Variable) %>% pivot_wider(names_from = Variable, values_from=Correlation)
-
-test2 <- test %>% select(-dataset) %>% mutate_all(as.numeric) %>% as.matrix()
-rownames(test2) <- test$dataset
-
+###HCP-specific testing (DX_2) comparisons
 
 ####################################
 ###Comparison: raw cortical thickness & network medians
@@ -495,6 +586,31 @@ hcp_medians_FEP$Method <- "CT-ranked"
 hcp_medians_raw_FEP$Method <- "CT"
 
 hcp_medians_combined <- rbind(hcp_medians_FEP, hcp_medians_raw_FEP)
+
+
+#####
+
+test <-ct_compare_correlations %>% filter(Score %in% c("SAPS_global", "SANS_global", "PANSS_pos", "PANSS_neg")) %>% filter(., grepl("Yeo", Label))
+test <-ct_compare_correlations %>% filter(Score %in% c("SAPS_global", "PANSS_pos")) %>% filter(., grepl("Yeo", Label))
+
+test %<>% mutate_at(vars("Correlation", "pvalue"), as.numeric)
+
+###Plotting: dataset (organized by median age), network-symptom correlations
+test <-ct_compare_correlations %>% filter(Score %in% c("SAPS_global", "PANSS_pos")) %>% filter(., grepl("Yeo", Label))
+
+test %<>% select(dataset, Correlation, Variable) %>% pivot_wider(names_from = Variable, values_from=Correlation)
+
+test2 <- test %>% select(-dataset) %>% mutate_all(as.numeric) %>% as.matrix()
+rownames(test2) <- test$dataset
+
+
+test <-ct_compare_correlations %>% filter(Score %in% c("SANS_global", "PANSS_neg")) %>% filter(., grepl("Yeo", Label))
+
+test %<>% select(dataset, Correlation, Variable) %>% pivot_wider(names_from = Variable, values_from=Correlation)
+
+test2 <- test %>% select(-dataset) %>% mutate_all(as.numeric) %>% as.matrix()
+rownames(test2) <- test$dataset
+
 
 #####################################################
 
