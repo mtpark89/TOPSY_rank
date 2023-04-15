@@ -60,6 +60,13 @@ stat_maps <- read_delim("../TOPSY_rank/stat_maps.txt", delim=",")
 stat_maps_left <- head(stat_maps, n=40962)
 stat_maps_right <- tail(stat_maps, n=40962)
 
+yeo7_left <-  c("Unmatched_left", "Visual_left", "Somatomotor_left", "DorsalAtt_left", "VentralAtt_left", "Limbic_yeo_left", "Frontoparietal_left", "Default_left")
+yeo7_right <-  c("Unmatched_right", "Visual_right", "Somatomotor_right", "DorsalAtt_right", "VentralAtt_right", "Limbic_yeo_right", "Frontoparietal_right", "Default_right")
+
+vonE_left <-  c("Unmatched_left", "Motor_left", "Association-FP_left", "Association-FT_left", "Sensory-2_left", "Sensory-1_left", "Limbic_left", "Insular_left")
+vonE_right <-  c("Unmatched_right", "Motor_right", "Association-FP_right", "Association-FT_right", "Sensory-2_right", "Sensory-1_right", "Limbic_right", "Insular_right")
+
+
 ###########################################################################################################
 
 datasets_t_aic <- data.frame()
@@ -310,49 +317,19 @@ for (dataset in unique(combined_df_TOPSY$Dataset)){
 	assign(paste0("cayley_ct_right_yeo7_", dataset), temp_right)
 }
 
+cayley_dx %<>% filter(!grepl("0", Variable))
+cayley_dx %<>% mutate(Network=gsub("_left|_right", "", Variable))
 
-###Symptom correlations in FEP/SCZ only
+networks_recode <- c("cayley_1" = "VIS",
+		"cayley_2" = "SM",
+		"cayley_3" = "DAN",
+		"cayley_4" = "VAN",
+		"cayley_5" = "LMB",
+		"cayley_6" = "FP",
+		"cayley_7" = "DMN")
+cayley_dx %<>% mutate(Network=recode(Network, !!!networks_recode))
 
-cayley_cors <- data.frame()
-
-for (dataset in unique(combined_df_TOPSY$Dataset)){
-	
-	data <- subset(combined_df_TOPSY, Dataset==dataset)
-	data %<>% filter(DX=="HC" | DX=="FEP" | DX=="Scz")
-	data$DX <- replace(data$DX, data$DX=="FEP", "Scz")
-	data$DX %<>% droplevels()
-
-	if (dataset=="HCPEP") {
-		data %<>% filter(DX_2!="Other")
-	}
-
-
-	left <- get(paste0("cayley_ct_left_yeo7_",dataset)) %>% append_colnames(., "_left")
-	right <- get(paste0("cayley_ct_right_yeo7_",dataset)) %>% append_colnames(., "_right")
-
-	data <- cbind(data, left, right)
-
-	data %<>% filter(DX!="HC")
-
-	if (dataset %in% c("BrainGluSchi", "COBRE", "HCPEP", "TOPSY")) {
-		scores <- data %>% select(starts_with(c("PANSS_")))
-	} else {
-		scores <- data %>% select(ends_with(c("_global")))
-	}
-
-
-	for(i in 1:ncol(scores)){
-		yeo7 <- cbind(Score=names(scores)[i], Dataset=dataset, Label="Yeo7", getCors(scores[[i]], data %>% select(starts_with("cayley_"))))
-		#left_von <- cbind(Score=names(scores)[i], dataset, Label="Left von Economo", getCors(scores[[i]], left_ct_vonEconomo))
-		#right_von <- cbind(Score=names(scores)[i], dataset, Label="Right von Economo", getCors(scores[[i]], right_ct_vonEconomo))
-
-		cayley_cors <- rbind(cayley_cors, yeo7)
-	}	
-
-}
-
-cayley_cors %<>% mutate_at(vars(starts_with(c("Correlation", "pvalue"))), as.numeric)
-cayley_cors %>% arrange(., pvalue) %>% filter(!grepl(0, Variable))
+write_tsv(cayley_dx, file="results/results_cayley_groupdiff_10dataset.tsv")
 
 ######################################
 ###Repeat with representative ranks of HCs in every dataset, and used as refernece for all subjects in every dataset.
@@ -387,9 +364,6 @@ cayley_ct_right_vonE_quant <- indiv_distance_cayley_sub(reference_hc_right, comb
 
 ###
 combined_df_TOPSY_quant <- cbind(combined_df_TOPSY, cayley_ct_left_yeo7_quant %>% append_colnames(., "_yeo7_left"), cayley_ct_right_yeo7_quant %>% append_colnames(., "_yeo7_right"))
-
-###Age correlations?
-getCors(combined_df_TOPSY_quant$Age, combined_df_TOPSY_quant %>% select(starts_with("cayley_")))
 
 ###Cayley distance (using quatile ranks across all datasets) testing per dataset, network distance ~ Age + Sex + DX
 cayley_dx_quant <- data.frame()
@@ -442,32 +416,151 @@ for (dataset in unique(combined_df_TOPSY_quant_yeo17$Dataset)){
 	cayley_dx_quant_yeo17 <- rbind(cayley_dx_quant_yeo17, cbind(Dataset=dataset, Label="Right Yeo", right_dx))
 }
 
-###Cross-dataset comparisons of effect sizes
 
-reshape2::dcast(cayley_dx_quant %>% select(Dataset, Variable, t_DXScz),  Dataset ~ Variable)
+cayley_dx_quant %<>% filter(!grepl("0", Variable))
+cayley_dx_quant %<>% mutate(Network=gsub("_yeo7_left|_yeo7_right", "", Variable))
+cayley_dx_quant %<>% mutate(Network=recode(Network, !!!networks_recode))
 
-test <- reshape2::dcast(cayley_dx_quant %>% select(Dataset, Variable, t_DXScz),  Variable ~ Dataset)
-test_mat <- as.matrix(test %>% select(-Variable))
-rownames(test_mat) <- test$Variable
-pheatmap::pheatmap(test_mat)
+write_tsv(cayley_dx_quant, file="results/results_cayley_groupdiff_10dataset_quantiles.tsv")
+
+###Plotting
+cayley_dx$asterisk <- ifelse(cayley_dx$p_DXScz < 0.05, "*", "")
+cayley_dx$Network <- factor(cayley_dx$Network, levels = unique(cayley_dx$Network))
+cayley_dx_plot <- cayley_dx
+
+###Order datasets based on median age and plot with facets
+dataset_ageorder <- combined_df_TOPSY %>% group_by(Dataset) %>% summarise(median_age=median(Age, na.rm=TRUE)) %>% arrange(median_age)
+
+cayley_dx_plot$Dataset <- factor(cayley_dx$Dataset, levels = c(dataset_ageorder$Dataset))
+cayley_dx_plot%<>% mutate(asterisk_pos = ifelse(t_DXScz > 0, t_DXScz + 0.1, 0.2))
+
+###Quantile-rank based differences across datasets
+cayley_dx_quant$asterisk <- ifelse(cayley_dx_quant$p_DXScz < 0.05, "*", "")
+cayley_dx_quant$Network <- factor(cayley_dx_quant$Network, levels = unique(cayley_dx_quant$Network))
+cayley_dx_quant_plot <- cayley_dx_quant
+
+###Order datasets based on median age and plot with facets
+cayley_dx_quant_plot$Dataset <- factor(cayley_dx_quant_plot$Dataset, levels = c(dataset_ageorder$Dataset))
+cayley_dx_quant_plot%<>% mutate(asterisk_pos = ifelse(t_DXScz > 0, t_DXScz + 0.1, 0.2))
+
+plot1<- ggplot(cayley_dx_plot, aes(x=Network, y=t_DXScz, fill="Network")) + geom_bar(stat="identity") + facet_grid(Dataset~ Label) + scale_fill_Publication2() + theme_Publication() +
+	theme(legend.position="none", text=element_text(size=12), axis.text.x=element_text(size=6, angle=45), axis.text.y=element_text(size=6, angle=0),
+	strip.text.x=element_text(size=8), strip.text.y=element_text(size=6)) +
+	xlab("Networks") + ylab("t-statistic") +
+	geom_text(aes(label=asterisk, y=asterisk_pos), vjust=0.6, size=3)
+
+plot2<- ggplot(cayley_dx_quant_plot, aes(x=Network, y=t_DXScz, fill="Network")) + geom_bar(stat="identity") + facet_grid(Dataset~ Label) + scale_fill_Publication2() + theme_Publication() +
+	theme(legend.position="none", text=element_text(size=12), axis.text.x=element_text(size=6, angle=45), axis.text.y=element_text(size=6, angle=0),
+	strip.text.x=element_text(size=8), strip.text.y=element_text(size=6)) +
+	xlab("Networks") + ylab("t-statistic") +
+	geom_text(aes(label=asterisk, y=asterisk_pos), vjust=0.6, size=3)
+
+ggsave("figures/Plot_cayley_dx_groups_10dataset_1.png", plot1, width=3, height=8, bg="white")
+ggsave("figures/Plot_cayley_dx_groups_10dataset_2.png", plot2, width=3, height=8, bg="white")
+ggsave("figures/Plot_cayley_dx_groups_10dataset.png", ggarrange(plot1, plot2, ncol=2), width=6, height=8, bg="white")
+
+###Alternative: heatmap
+plot_cayley_dx_heatmap <-ggplot(cayley_dx_plot, aes(x=Network, y=Dataset, fill=t_DXScz)) + 
+    geom_tile(color="white") + 
+    geom_rect(data = subset(cayley_dx_plot, p_DXScz < 0.05),
+              aes(xmin = as.numeric(Network) - 0.5, xmax = as.numeric(Network) + 0.5,
+                  ymin = as.numeric(Dataset) - 0.5, ymax = as.numeric(Dataset) + 0.5),
+              color = "black", fill = NA, size = 1.5) +
+    scale_fill_gradientn(colors = pub_ready_colors) +
+    theme_Publication() +  
+    geom_text(aes(label=round(t_DXScz, 2), fontface=ifelse(p_DXScz < 0.05, "bold", "plain")), size=4, family="Helvetica") + 
+    facet_grid(~ Label) +
+    theme(legend.position="bottom", legend.key.size =unit(1, "cm"),
+          text=element_text(size=12), axis.text.x=element_text(size=10, angle=0), axis.text.y=element_text(size=10, angle=0),
+          strip.text.x=element_text(size=12), strip.text.y=element_text(size=12))
+
+ggsave("figures/Plot_cayley_dx_groups_10dataset_heatmap.png", plot_cayley_dx_heatmap, width=8, height=5, bg="white")
+
+###Symptom correlations in FEP/SCZ only
+
+cayley_cors <- data.frame()
+
+for (dataset in unique(combined_df_TOPSY$Dataset)){
+	
+	data <- subset(combined_df_TOPSY, Dataset==dataset)
+	data %<>% filter(DX=="HC" | DX=="FEP" | DX=="Scz")
+	data$DX <- replace(data$DX, data$DX=="FEP", "Scz")
+	data$DX %<>% droplevels()
+
+	if (dataset=="HCPEP") {
+		data %<>% filter(DX_2!="Other")
+	}
 
 
-rownames(test) <- test[,1]
-test <- test[,-1]
+	left <- get(paste0("cayley_ct_left_yeo7_",dataset)) %>% append_colnames(., "_left")
+	right <- get(paste0("cayley_ct_right_yeo7_",dataset)) %>% append_colnames(., "_right")
+
+	data <- cbind(data, left, right)
+
+	data %<>% filter(DX!="HC")
+
+	if (dataset %in% c("BrainGluSchi", "COBRE", "HCPEP", "TOPSY")) {
+		scores <- data %>% select(starts_with(c("PANSS_")))
+	} else {
+		scores <- data %>% select(ends_with(c("_global")))
+	}
 
 
-test %<>% select(-Variable)
-test %<>% filter(., !grepl("0", Variable))
-summary(cor(test)[lower.tri(cor(test))])
+	for(i in 1:ncol(scores)){
+		yeo7 <- cbind(Score=names(scores)[i], Dataset=dataset, Label="Yeo7", getCors(scores[[i]], data %>% select(starts_with("cayley_"))))
+		#left_von <- cbind(Score=names(scores)[i], dataset, Label="Left von Economo", getCors(scores[[i]], left_ct_vonEconomo))
+		#right_von <- cbind(Score=names(scores)[i], dataset, Label="Right von Economo", getCors(scores[[i]], right_ct_vonEconomo))
 
-pairwise_cors(test)
+		cayley_cors <- rbind(cayley_cors, yeo7)
+	}	
+}
 
+cayley_cors %<>% mutate_at(vars(starts_with(c("Correlation", "pvalue"))), as.numeric)
+cayley_cors %>% arrange(., pvalue) %>% filter(!grepl(0, Variable))
+cayley_cors %<>% filter(!grepl("0", Variable))
+cayley_cors %<>% filter(Score!="PANSS_g" & Score!="PANSS_total")
 
-test <- reshape2::dcast(cayley_dx_quant_yeo17 %>% select(Dataset, Variable, t_DXScz),  Variable ~ Dataset)
-test_mat <- as.matrix(test %>% select(-Variable))
-rownames(test_mat) <- test$Variable
-pheatmap::pheatmap(test_mat)
+write_tsv(cayley_cors, file="results/results_cayley_correlations_10dataset.tsv")
 
+###Plotting Cayley-symptom correlations
+
+cayley_cors %<>% mutate(Score_2 = case_when(
+    Score %in% c("PANSS_pos", "SAPS_global") ~ "Positive",
+    Score %in% c("PANSS_neg", "SANS_global") ~ "Negative"
+))
+
+cayley_cors %<>%
+  mutate(Hemisphere = case_when(
+    grepl("_left", Variable) ~ "Left",
+    grepl("_right", Variable) ~ "Right"
+))
+
+cayley_cors %<>% mutate(Network=gsub("_left|_right","",Variable))
+cayley_cors %<>% mutate(Network=recode(Network, !!!networks_recode))
+cayley_cors$Network <- factor(cayley_cors$Network, levels = unique(cayley_cors$Network))
+
+###Order datasets based on median age and plot with facets
+cayley_cors$Dataset <- factor(cayley_cors$Dataset, levels = c(dataset_ageorder$Dataset))
+cayley_dx_plot%<>% mutate(asterisk_pos = ifelse(t_DXScz > 0, t_DXScz + 0.1, 0.2))
+
+library(RColorBrewer)
+pub_ready_colors <- rev(brewer.pal(11, "RdYlBu"))
+
+plot_cayley_cors <- ggplot(cayley_cors, aes(x=Network, y=Dataset, fill=Correlation)) + 
+    geom_tile(color="white") + 
+    geom_rect(data = subset(cayley_cors, pvalue < 0.05),
+              aes(xmin = as.numeric(Network) - 0.5, xmax = as.numeric(Network) + 0.5,
+                  ymin = as.numeric(Dataset) - 0.5, ymax = as.numeric(Dataset) + 0.5),
+              color = "black", fill = NA, size = 1.5) +
+    scale_fill_gradientn(colors = pub_ready_colors) +
+    theme_Publication() +  
+    geom_text(aes(label=round(Correlation, 2), fontface=ifelse(pvalue < 0.05, "bold", "plain")), size=4, family="Helvetica") + 
+    facet_grid(Score_2 ~ Hemisphere) +
+    theme(legend.position="bottom", legend.key.size =unit(1, "cm"),
+          text=element_text(size=12), axis.text.x=element_text(size=10, angle=0), axis.text.y=element_text(size=10, angle=0),
+          strip.text.x=element_text(size=12), strip.text.y=element_text(size=12))
+
+ggsave("figures/Plot_cayley_cors.png", plot_cayley_cors, width=10, height=9, bg="white")
 
 ###Median rank correlation comparisons
 
@@ -544,49 +637,20 @@ for (dataset in unique(combined_df_TOPSY$Dataset)){
 ct_compare_correlations %<>% mutate_at(vars(starts_with(c("Correlation", "pvalue"))), as.numeric)
 ct_compare_correlations_yeo17 %<>% mutate_at(vars(starts_with(c("Correlation", "pvalue"))), as.numeric)
 
-test <- reshape2::dcast(ct_compare_correlations %>% filter(Score=="PANSS_pos" | Score=="SAPS_global") %>% select(dataset, Variable, Correlation),  dataset ~ Variable)
-test_mat <- test %>% select(-dataset) %>% as.matrix()
-rownames(test_mat) <- test$dataset
-pheatmap::pheatmap(test_mat)
-
-test <- reshape2::dcast(ct_compare_correlations %>% filter(Score=="PANSS_neg" | Score=="SANS_global") %>% select(dataset, Variable, Correlation),  dataset ~ Variable)
-test_mat <- test %>% select(-dataset) %>% as.matrix()
-rownames(test_mat) <- test$dataset
-pheatmap::pheatmap(test_mat)
-
-test <- ct_compare_correlations %>% select(Variable, pvalue, Score, pvalue_raw) %>% melt(., id.vars=c("Score", "Variable")
+test <- ct_compare_correlations %>% select(Variable, pvalue, Score, pvalue_raw) %>% melt(., id.vars=c("Score", "Variable"))
 test %<>% mutate(Variable=gsub("_left|_right", "", Variable))%>% filter(Variable!="Unmatched")  %>% filter(!grepl("PANSS_total|PANSS_g", Score))
 
+#Manhatten-style plot, need to label top correlations
 ggplot(test, aes(x=Variable, y=-log10(value), color=Score)) + geom_point(position=position_dodge(0.5), size=2) + facet_wrap(~variable, ncol=2)
 
 ggplot(test, aes(x=Variable, y=-log10(value), color=variable)) + geom_point(position=position_dodge(0.5), size=2) + facet_wrap(~variable, ncol=2)
 
 
+
+qplot(ct_compare_correlations$Correlation, ct_compare_correlations$Correlation_raw)
 ###HCP-specific testing (DX_2) comparisons
 
 ####################################
-###Comparison: raw cortical thickness & network medians
-
-left_ct <- vertexTable(hcp$left_ct)
-right_ct <- vertexTable(hcp$right_ct)
-
-left_ct_yeo <- getMedians(left_ct, stat_maps_left$yeo7)
-right_ct_yeo <- getMedians(right_ct, stat_maps_right$yeo7)
-
-hcp_medians_raw <- cbind(hcp, left_ct_yeo, right_ct_yeo)
-hcp_medians_raw_FEP <- subset(hcp_medians_raw, DX=="FEP")
-
-getCors(hcp_medians_raw_FEP$totalP, hcp_medians_raw_FEP[(ncol(hcp_medians_raw_FEP)-15):ncol(hcp_medians_raw_FEP)])
-getCors(hcp_medians_raw_FEP$totalN, hcp_medians_raw_FEP[(ncol(hcp_medians_raw_FEP)-15):ncol(hcp_medians_raw_FEP)])
-getCors(hcp_medians_raw_FEP$WksTo50P, hcp_medians_raw_FEP[(ncol(hcp_medians_raw_FEP)-15):ncol(hcp_medians_raw_FEP)])
-getCors(hcp_medians_raw_FEP$WksToCGI2, hcp_medians_raw_FEP[(ncol(hcp_medians_raw_FEP)-15):ncol(hcp_medians_raw_FEP)])
-
-###Plotting for comparison
-hcp_medians_FEP$Method <- "CT-ranked"
-hcp_medians_raw_FEP$Method <- "CT"
-
-hcp_medians_combined <- rbind(hcp_medians_FEP, hcp_medians_raw_FEP)
-
 
 #####
 
@@ -611,144 +675,25 @@ test %<>% select(dataset, Correlation, Variable) %>% pivot_wider(names_from = Va
 test2 <- test %>% select(-dataset) %>% mutate_all(as.numeric) %>% as.matrix()
 rownames(test2) <- test$dataset
 
-
-#####################################################
-
-
-###5. Imaging-transcriptomics & comparison to raw CT-based testing
-
-ct_compare_ahba <- data.frame()
-for (dataset in unique(combined_df$Dataset)){
-	
-	data <- subset(combined_df, Dataset==dataset)
-	data %<>% filter(DX=="HC" | DX=="FEP" | DX=="Scz")
-	data$DX %<>% droplevels()
-
-	data_split <- split(data, data$DX)
-
-	#Read in files, raw ct and ranked, and for groups.	
-	left_ct <- vertexTable(data$left_ct)
-	right_ct <- vertexTable(data$right_ct)
-
-	left_ct_rank <- t(vertexTableRank(data$left_ct))
-	right_ct_rank <- t(vertexTableRank(data$right_ct))
-
-	left_ct_rank_HC <- t(vertexTableRank(data_split[[1]]$left_ct))
-	right_ct_rank_HC <- t(vertexTableRank(data_split[[1]]$right_ct))
-
-	left_ct_rank_Scz <- t(vertexTableRank(data_split[[2]]$left_ct))
-	right_ct_rank_Scz <- t(vertexTableRank(data_split[[2]]$right_ct))
-	
-	#Group means: mean CT across dataset, and ranked mean CT
-	group_mean_left <- cbind(rowMeans(left_ct), rank(rowMeans(left_ct), ties.method="first"))
-	group_mean_right <- cbind(rowMeans(right_ct), rank(rowMeans(right_ct), ties.method="first"))
-
-	colnames(group_mean_left) <- c("left_ct", "left_ct_rank")
-	colnames(group_mean_right) <- c("right_ct", "right_ct_rank")
-	
-	#Get group-wise median rank of individual ranked CT (which is ranked again), and combine with cortical maps
-	group_left_ct_final <- cbind(group_mean_left, rank(rowMedians(left_ct_rank), ties.method="first"), stat_maps_left)
-	colnames(group_left_ct_final)[1:3] <- c("mean_ct", "mean_ct_rank", "median_ct_rank")
-	
-	#Print out plots for each dataset
-	plot1 <- ggplot(group_left_ct_final, aes(x=median_ct_rank, y=as.factor(yeo7))) +
-		geom_density_ridges(alpha=1, size=1) + stat_density_ridges(quantile_lines=TRUE, quantiles=0.5) + 
-		theme_ridges(grid=FALSE, center_axis_labels=TRUE) +
-		labs(x = "", y = "Yeo Networks", title = dataset) +
-		scale_y_discrete(labels=c("Unmatched", "Visual", "Somatomotor", "DorsalAtt", "VentralAtt", "Limbic", "Frontoparietal", "Default")) +
-		theme_minimal() + 
-		theme(text=element_text(size=22, family="Helvetica"),
-			axis.text.x=element_text(angle=45, hjust=0.35),
-			axis.title.x=element_blank(),
-			axis.text=element_text(size=16),
-			plot.title = element_text(size=20, face="bold"))
-
-	plot2 <- ggplot(group_left_ct_final, aes(x=median_ct_rank, y=as.factor(vonEconomo))) +
-		geom_density_ridges(alpha=1, size=1) + stat_density_ridges(quantile_lines=TRUE, quantiles=0.5) + 
-		theme_ridges(grid=FALSE, center_axis_labels=TRUE) +
-		labs(x = "", y = "von Economo class") +
-		scale_y_discrete(labels=c("Unmatched", "Visual", "Somatomotor", "DorsalAtt", "VentralAtt", "Limbic", "Frontoparietal", "Default")) +
-		theme_minimal() + 
-		theme(text=element_text(size=22, family="Helvetica"),
-			axis.text.x=element_text(angle=45, hjust=0.35),
-			axis.title.x=element_blank(),
-			axis.text=element_text(size=16),
-			plot.title = element_text(size=20, face="bold"))
-
-	ggsave(paste("results/Plot_networks_ranks_",dataset,".png",sep=""), ggarrange(plot1, plot2, ncol=2), width=10, height=5, bg="white")
-
-	#Model comparisons: raw vs. ranked
-	
-	left_ct_compare <- compare_models(data, "left_ct", "DX")
-	right_ct_compare <- compare_models(data, "right_ct", "DX")
-	combined_compare <- rbind(left_ct_compare, right_ct_compare)
-
-	assign(paste0("left_ct_compare_", dataset), left_ct_compare)
-	assign(paste0("right_ct_compare_", dataset), right_ct_compare)
-
-	#t.tests for combined, and left/right, and add results to df for all datasets
-	t_comb <- t.test(combined_compare$AIC_raw, combined_compare$AIC_ranked)
-	t_left <- t.test(left_ct_compare$AIC_raw, left_ct_compare$AIC_ranked)
-	t_right <- t.test(right_ct_compare$AIC_raw, right_ct_compare$AIC_ranked)
-
-	t_aic <- cbind(dataset, parse_ttest(t_comb), parse_ttest(t_left), parse_ttest(t_right))
-	colnames(t_aic) <- c("dataset", "t_combined", "p_combined", "t_left", "p_left", "t_right", "p_right")
-		
-	datasets_t_aic <- rbind(datasets_t_aic, t_aic)
-
-	#Group differences in average rank using permutation testing, and write out results
-	assign(paste0("left_ct_rank_diff_", dataset), average_rank_diff_permute(data_split[[1]]$left_ct, data_split[[2]]$left_ct, 10000))
-	assign(paste0("right_ct_rank_diff_", dataset), average_rank_diff_permute(data_split[[1]]$right_ct, data_split[[2]]$right_ct, 10000))
-
-	writeVertex(get(paste0("left_ct_rank_diff_", dataset)), paste0("results/left_ct_rank_diff_",dataset,".vertstats"))
-	writeVertex(get(paste0("right_ct_rank_diff_", dataset)), paste0("results/right_ct_rank_diff_",dataset,".vertstats"))
-
-	#Plotting mean rank differences
-	left_ct_rank_diff <- get(paste0("left_ct_rank_diff_", dataset))
-	right_ct_rank_diff <- get(paste0("right_ct_rank_diff_", dataset))
-	
-	left_ct_rank_diff$hemi <- "Left CT"
-	right_ct_rank_diff$hemi <- "Right CT"
-	ct_rank_diff <- rbind(left_ct_rank_diff, right_ct_rank_diff)
-
-	plot_histo <- 
-	ggplot(ct_rank_diff, aes(x=diff, group=hemi, fill=hemi)) + 
-		geom_density(alpha=0.5, size=1) + 
-		labs(x = "Mean rank difference", y = "Density", title = dataset) +
-		theme_minimal() + 
-		theme(text=element_text(size=22, family="Helvetica"), 
-			axis.text.x=element_text(angle=45), 
-			axis.text=element_text(size=16),
-			legend.position="none", 
-			plot.title=element_text(hjust=0.5)) +
-		geom_vline(xintercept=sd(ct_rank_diff$diff)*2, linetype="dashed", colour="darkgray", size=2) + 
-		geom_vline(xintercept=-sd(ct_rank_diff$diff)*2, linetype="dashed", colour="darkgray", size=2)
-
-	ggsave(paste0("results/Plot_histo_mean_rankdiff_",dataset,".png"), plot_histo, width=5, height=5, bg="white")
-	
-	###DONE###
-}
+###Combined analysis: cayley, median, etc.
 
 
-###AHBA: ranked CT
-left_ct_rank_diff_ahba <- ahba_CIVET(left_ct_rank_diff$diff)
-ahba_CIVET_write("left_ct_rank_diff_ahba", left_ct_rank_diff_ahba, "left_ct_rank_diff_ahba/")
 
-###AHBA: raw CT linear model
-vs <- vertexLm(left_ct ~ DX, data=subset(hcp, DX=="FEP" | DX=="HC"))
+###Cross-dataset comparisons of effect sizes
 
-vs <- vertexLm(left_ct ~ DX, data=subset(combined_df_TOPSY, Dataset=="COBRE"))
-vs %<>% data.frame()
+reshape2::dcast(cayley_dx_quant %>% select(Dataset, Variable, t_DXScz),  Dataset ~ Variable)
 
-left_ct_raw_lm_ahba <- ahba_CIVET(vs$tvalue.DXScz)
+test <- reshape2::dcast(cayley_dx_quant %>% select(Dataset, Variable, t_DXScz),  Variable ~ Dataset)
+test_mat <- as.matrix(test %>% select(-Variable))
+rownames(test_mat) <- test$Variable
+pheatmap::pheatmap(test_mat)
 
-left_ct_raw_lm_ahba <- ahba_CIVET(vs$tvalue.DXFEP)
-ahba_CIVET_write("left_ct_raw_lm_ahba", left_ct_raw_lm_ahba, "left_ct_raw_lm_ahba/")
 
-###AHBA: raw CT using mean CT & subtraction
+pairwise_cors(test)
 
-left_ct_raw_meandiff <- average_vertex_diff(hcp_HC$left_ct, hcp_FEP$left_ct)
-writeVertex(left_ct_raw_meandiff, file="results/left_ct_raw_meandiff.vertstats")
 
-left_ct_raw_meandiff_ahba <- ahba_CIVET(left_ct_raw_meandiff$diff)
-ahba_CIVET_write("left_ct_raw_meandiff_ahba", left_ct_raw_meandiff_ahba, "left_ct_raw_meandiff_ahba/")
+test <- reshape2::dcast(cayley_dx_quant_yeo17 %>% select(Dataset, Variable, t_DXScz),  Variable ~ Dataset)
+test_mat <- as.matrix(test %>% select(-Variable))
+rownames(test_mat) <- test$Variable
+pheatmap::pheatmap(test_mat)
+
